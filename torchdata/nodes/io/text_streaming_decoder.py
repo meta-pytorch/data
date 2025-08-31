@@ -1,10 +1,32 @@
 import logging
+import time
 from typing import Any, Dict, Optional, Union
 
 import smart_open
 from torchdata.nodes import BaseNode
 
 logger = logging.getLogger(__name__)
+
+
+def _fibonacci_backoff(attempt: int, base_delay: float = 1.0) -> float:
+    """Calculate Fibonacci backoff delay for retry attempts.
+
+    Args:
+        attempt: Current attempt number (1-based)
+        base_delay: Base delay in seconds
+
+    Returns:
+        float: Delay in seconds before next retry
+    """
+    if attempt <= 0:
+        return 0.0
+
+    # Fibonacci sequence: 1, 1, 2, 3, 5, 8, 13, 21, ...
+    fib_sequence = [1, 1]
+    for i in range(2, attempt + 1):
+        fib_sequence.append(fib_sequence[i - 1] + fib_sequence[i - 2])
+
+    return base_delay * fib_sequence[attempt - 1]
 
 
 class TextStreamingDecoder(BaseNode[Dict]):
@@ -19,6 +41,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
     - Handles compressed files (.gz, .bz2) transparently
     - Maintains state for checkpointing and resumption
     - Preserves metadata from source nodes
+    - Automatic retry with Fibonacci backoff for file opening errors
 
     Input format:
         {
@@ -41,10 +64,11 @@ class TextStreamingDecoder(BaseNode[Dict]):
         >>> # Stream from local file
         >>> node = TextStreamingDecoder(source_node)
         >>>
-        >>> # Stream from S3 with custom client
+        >>> # Stream from S3 with custom client and retry logic
         >>> node = TextStreamingDecoder(
         ...     source_node,
-        ...     transport_params={'client': boto3.client('s3')}
+        ...     transport_params={'client': boto3.client('s3')},
+        ...     max_retries=5
         ... )
         >>>
         >>> # Stream compressed files
@@ -66,6 +90,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
         mode: str = "r",
         encoding: Optional[str] = "utf-8",
         transport_params: Optional[Dict] = None,
+        max_retries: int = 3,
     ):
         """Initialize the TextStreamingDecoder.
 
@@ -80,12 +105,14 @@ class TextStreamingDecoder(BaseNode[Dict]):
                     {'compression': '.gz'}  # Force gzip compression
                     {'compression': '.bz2'}  # Force bz2 compression
                     {'compression': 'disable'}  # Disable compression
+            max_retries: Maximum number of retry attempts for file opening errors (default: 3)
         """
         super().__init__()
         self.source = source_node
         self.mode = mode
         self.encoding = encoding
         self.transport_params = transport_params or {}
+        self.max_retries = max_retries
         self._current_file = None
         self._current_line = 0
         self._file_handle = None
@@ -119,12 +146,34 @@ class TextStreamingDecoder(BaseNode[Dict]):
 
             # If we have a file to resume, open and seek to position
             if self._current_file is not None:
-                self._file_handle = smart_open.open(
-                    self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
-                )
-                # Skip lines to resume position
-                for _ in range(self._current_line):
-                    next(self._file_handle)
+                # Retry logic for file opening during state restoration
+                for attempt in range(1, self.max_retries + 1):
+                    try:
+                        self._file_handle = smart_open.open(
+                            self._current_file,
+                            self.mode,
+                            encoding=self.encoding,
+                            transport_params=self.transport_params,
+                        )
+                        # Skip lines to resume position
+                        for _ in range(self._current_line):
+                            next(self._file_handle)
+                        break  # Successfully opened and positioned
+
+                    except Exception as e:
+                        if attempt < self.max_retries:
+                            delay = _fibonacci_backoff(attempt)
+                            logger.warning(
+                                f"Error opening {self._current_file} during state restoration (attempt {attempt}/{self.max_retries}): {e}. Retrying in {delay:.2f}s..."
+                            )
+                            time.sleep(delay)
+                        else:
+                            # Max retries reached, log error and continue without file handle
+                            logger.error(
+                                f"Failed to open {self._current_file} during state restoration after {self.max_retries} attempts. Last error: {e}"
+                            )
+                            self._file_handle = None
+                            break
 
     def __del__(self):
         """Ensure file is closed on deletion."""
@@ -154,17 +203,30 @@ class TextStreamingDecoder(BaseNode[Dict]):
                 self._current_file = file_data
                 self._source_metadata = {}
 
-            try:
-                # Open the file
-                self._file_handle = smart_open.open(
-                    self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
-                )
-                self._current_line = 0
-                return True
-            except Exception as e:
-                logger.error(f"Error opening {self._current_file}: {e}")
-                self._file_handle = None
-                return False  # Failed to open file
+            # Retry logic for file opening
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    # Try to open the file
+                    self._file_handle = smart_open.open(
+                        self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
+                    )
+                    self._current_line = 0
+                    return True
+
+                except Exception as e:
+                    if attempt < self.max_retries:
+                        delay = _fibonacci_backoff(attempt)
+                        logger.warning(
+                            f"Error opening {self._current_file} (attempt {attempt}/{self.max_retries}): {e}. Retrying in {delay:.2f}s..."
+                        )
+                        time.sleep(delay)
+                    else:
+                        # Max retries reached
+                        logger.error(
+                            f"Failed to open {self._current_file} after {self.max_retries} attempts. Last error: {e}"
+                        )
+                        self._file_handle = None
+                        return False  # Failed to open file
 
         except StopIteration:
             # No more files

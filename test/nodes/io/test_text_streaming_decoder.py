@@ -28,6 +28,11 @@ Test coverage includes:
 5. Error handling
    - Invalid file paths
    - Recovery from errors
+
+6. Retry logic
+   - Retry on file opening errors
+   - Fibonacci backoff
+   - Max retries configuration
 """
 
 import os
@@ -38,7 +43,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from torchdata.nodes import BaseNode
-from torchdata.nodes.io.text_streaming_decoder import TextStreamingDecoder
+from torchdata.nodes.io.text_streaming_decoder import _fibonacci_backoff, TextStreamingDecoder
 
 
 class MockSourceNode(BaseNode[Dict]):
@@ -403,3 +408,177 @@ def test_azure_gcs_support(mock_smart_open):
     item = next(iter(node))
     assert item[TextStreamingDecoder.DATA_KEY] == "gcs_content"
     assert item[TextStreamingDecoder.METADATA_KEY]["source"] == "gs"
+
+
+def test_fibonacci_backoff():
+    """Test Fibonacci backoff calculation."""
+    # Test Fibonacci sequence: 1, 1, 2, 3, 5, 8, 13, 21, ...
+    expected_delays = [1.0, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0, 21.0]
+
+    for attempt, expected_delay in enumerate(expected_delays, 1):
+        actual_delay = _fibonacci_backoff(attempt)
+        assert actual_delay == expected_delay, f"Attempt {attempt}: expected {expected_delay}, got {actual_delay}"
+
+    # Test with custom base delay
+    assert _fibonacci_backoff(1, base_delay=2.0) == 2.0
+    assert _fibonacci_backoff(2, base_delay=2.0) == 2.0
+    assert _fibonacci_backoff(3, base_delay=2.0) == 4.0
+
+    # Test edge cases
+    assert _fibonacci_backoff(0) == 0.0
+    assert _fibonacci_backoff(-1) == 0.0
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_success_after_failure(mock_sleep, mock_smart_open):
+    """Test retry logic when it succeeds after initial failures."""
+    # Mock smart_open to fail twice then succeed
+    mock_file = MagicMock()
+    mock_file.readline.side_effect = ["success_line\n", ""]
+
+    mock_smart_open.side_effect = [
+        Exception("Connection timeout"),  # First attempt fails
+        Exception("Network error"),  # Second attempt fails
+        mock_file,  # Third attempt succeeds
+    ]
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    node = TextStreamingDecoder(source_node, max_retries=3)
+
+    # Should succeed on third attempt
+    content = next(iter(node))
+    assert content[TextStreamingDecoder.DATA_KEY] == "success_line"
+
+    # Verify sleep was called twice with Fibonacci delays
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(1.0)  # First retry delay
+    mock_sleep.assert_any_call(1.0)  # Second retry delay
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_max_retries_exceeded(mock_sleep, mock_smart_open):
+    """Test retry logic when max retries are exceeded."""
+    # Mock smart_open to always fail
+    mock_smart_open.side_effect = Exception("Connection timeout")
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    node = TextStreamingDecoder(source_node, max_retries=2)
+
+    # Should skip the file and try the next one (if any)
+    # Since we only have one file and it fails, we should get StopIteration
+    with pytest.raises(StopIteration):
+        next(iter(node))
+
+    # Verify sleep was called twice
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(1.0)  # First retry delay
+    mock_sleep.assert_any_call(1.0)  # Second retry delay
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_zero_retries(mock_sleep, mock_smart_open):
+    """Test retry logic with zero retries (should fail immediately)."""
+    # Mock smart_open to fail
+    mock_smart_open.side_effect = Exception("Connection timeout")
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    node = TextStreamingDecoder(source_node, max_retries=0)
+
+    # Should fail immediately without retrying
+    with pytest.raises(StopIteration):
+        next(iter(node))
+
+    # Verify sleep was never called
+    mock_sleep.assert_not_called()
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_state_restoration(mock_sleep, mock_smart_open):
+    """Test retry logic during state restoration."""
+    # Mock smart_open to fail twice then succeed during state restoration
+    mock_file = MagicMock()
+    mock_file.readline.side_effect = ["resumed_line\n", ""]
+
+    mock_smart_open.side_effect = [
+        Exception("Connection timeout"),  # First attempt fails
+        Exception("Network error"),  # Second attempt fails
+        mock_file,  # Third attempt succeeds
+    ]
+
+    temp_dir, file_paths = create_test_files()
+    try:
+        source_node = MockSourceNode(file_paths)
+        node = TextStreamingDecoder(source_node, max_retries=3)
+
+        # Read first line and store state
+        first_item = next(iter(node))
+        state = node.get_state()
+
+        # Create new node and restore state (this will trigger retry logic)
+        new_source = MockSourceNode(file_paths)
+        new_node = TextStreamingDecoder(new_source, max_retries=3)
+        new_node.reset(state)
+
+        # Read next line - should succeed after retries
+        second_item = next(iter(new_node))
+        assert second_item[TextStreamingDecoder.DATA_KEY] != first_item[TextStreamingDecoder.DATA_KEY]
+
+        # Verify sleep was called twice during state restoration
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_any_call(1.0)  # First retry delay
+        mock_sleep.assert_any_call(1.0)  # Second retry delay
+
+    finally:
+        for path in file_paths:
+            if os.path.exists(path):
+                os.remove(path)
+        os.rmdir(temp_dir)
+
+
+def test_text_streaming_decoder_custom_max_retries():
+    """Test TextStreamingDecoder with custom max_retries parameter."""
+    file_paths = ["test.txt"]
+    source_node = MockSourceNode(file_paths)
+
+    # Test default max_retries
+    node_default = TextStreamingDecoder(source_node)
+    assert node_default.max_retries == 3
+
+    # Test custom max_retries
+    node_custom = TextStreamingDecoder(source_node, max_retries=5)
+    assert node_custom.max_retries == 5
+
+    # Test zero retries
+    node_zero = TextStreamingDecoder(source_node, max_retries=0)
+    assert node_zero.max_retries == 0
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_break_on_success(mock_sleep, mock_smart_open):
+    """Test that the retry loop breaks immediately on successful file opening."""
+    # Mock smart_open to succeed on first attempt
+    mock_file = MagicMock()
+    mock_file.readline.side_effect = ["success_line\n", ""]
+    mock_smart_open.return_value = mock_file
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    node = TextStreamingDecoder(source_node, max_retries=3)
+
+    # Should succeed immediately
+    content = next(iter(node))
+    assert content[TextStreamingDecoder.DATA_KEY] == "success_line"
+
+    # Verify sleep was never called (no retries needed)
+    mock_sleep.assert_not_called()
+
+    # Verify smart_open was called exactly once
+    assert mock_smart_open.call_count == 1
