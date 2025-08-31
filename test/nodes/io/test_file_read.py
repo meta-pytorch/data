@@ -1,7 +1,7 @@
 """Tests for universal FileReader."""
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 from unittest.mock import MagicMock, mock_open, patch
 
 import boto3
@@ -9,7 +9,7 @@ import pytest
 from moto import mock_aws
 from torchdata.nodes import BaseNode
 
-from torchdata.nodes.io.file_read import FileReader
+from torchdata.nodes.io.file_read import _fibonacci_backoff, FileReader
 
 
 class MockSourceNode(BaseNode[Dict]):
@@ -24,7 +24,7 @@ class MockSourceNode(BaseNode[Dict]):
     def reset(self, initial_state=None):
         super().reset(initial_state)
         if initial_state is not None:
-            self._current_idx = initial_state.get("current_idx", 0)
+            self._current_idx = initial_state.get("idx", 0)
         else:
             self._current_idx = 0
 
@@ -38,7 +38,7 @@ class MockSourceNode(BaseNode[Dict]):
         return {FileReader.DATA_KEY: path, FileReader.METADATA_KEY: dict(self.metadata)}
 
     def get_state(self):
-        return {"current_idx": self._current_idx}
+        return {"idx": self._current_idx}
 
 
 @pytest.fixture(scope="function")
@@ -139,7 +139,7 @@ def test_file_reader_state_management(temp_dir):
     content1 = next(reader_node)
     assert content1[FileReader.DATA_KEY] == "content1"
 
-    # Save state after first file
+    # Save state
     state = reader_node.get_state()
 
     # Read second file
@@ -342,3 +342,197 @@ def test_file_reader_error_handling():
         # Should raise the original exception
         with pytest.raises(IOError, match="File not found"):
             next(reader_node)
+
+
+def test_fibonacci_backoff():
+    """Test Fibonacci backoff calculation."""
+    # Test Fibonacci sequence: 1, 1, 2, 3, 5, 8, 13, 21, ...
+    expected_delays = [1.0, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0, 21.0]
+
+    for attempt, expected_delay in enumerate(expected_delays, 1):
+        actual_delay = _fibonacci_backoff(attempt)
+        assert actual_delay == expected_delay, f"Attempt {attempt}: expected {expected_delay}, got {actual_delay}"
+
+    # Test with custom base delay
+    assert _fibonacci_backoff(1, base_delay=2.0) == 2.0
+    assert _fibonacci_backoff(2, base_delay=2.0) == 2.0
+    assert _fibonacci_backoff(3, base_delay=2.0) == 4.0
+
+    # Test edge cases
+    assert _fibonacci_backoff(0) == 0.0
+    assert _fibonacci_backoff(-1) == 0.0
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_success_after_failure(mock_sleep, mock_smart_open):
+    """Test retry logic when it succeeds after initial failures."""
+    # Mock smart_open to fail twice then succeed
+    mock_smart_open.side_effect = [
+        Exception("Connection timeout"),  # First attempt fails
+        Exception("Network error"),  # Second attempt fails
+        MagicMock(
+            __enter__=MagicMock(return_value=MagicMock(read=lambda: "success_content")),
+            __exit__=MagicMock(return_value=None),
+        ),  # Third attempt succeeds
+    ]
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    reader_node = FileReader(source_node, max_retries=3)
+
+    # Should succeed on third attempt
+    content = next(reader_node)
+    assert content[FileReader.DATA_KEY] == "success_content"
+
+    # Verify sleep was called twice with Fibonacci delays
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(1.0)  # First retry delay
+    mock_sleep.assert_any_call(1.0)  # Second retry delay
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_max_retries_exceeded(mock_sleep, mock_smart_open):
+    """Test retry logic when max retries are exceeded."""
+    # Mock smart_open to always fail
+    mock_smart_open.side_effect = Exception("Connection timeout")
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    reader_node = FileReader(source_node, max_retries=2)
+
+    # Should raise exception after max retries
+    with pytest.raises(Exception, match="Connection timeout"):
+        next(reader_node)
+
+    # Verify sleep was called twice
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(1.0)  # First retry delay
+    mock_sleep.assert_any_call(1.0)  # Second retry delay
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_file_not_found(mock_sleep, mock_smart_open):
+    """Test retry logic with file not found error (should retry anyway)."""
+    # Mock smart_open to fail with file not found
+    mock_smart_open.side_effect = Exception("File not found")
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    reader_node = FileReader(source_node, max_retries=2)
+
+    # Should retry and then raise exception
+    with pytest.raises(Exception, match="File not found"):
+        next(reader_node)
+
+    # Verify sleep was called twice (retries on any error)
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(1.0)  # First retry delay
+    mock_sleep.assert_any_call(1.0)  # Second retry delay
+
+
+def test_file_reader_custom_max_retries():
+    """Test FileReader with custom max_retries parameter."""
+    file_paths = ["test.txt"]
+    source_node = MockSourceNode(file_paths)
+
+    # Test default max_retries
+    reader_default = FileReader(source_node)
+    assert reader_default.max_retries == 3
+
+    # Test custom max_retries
+    reader_custom = FileReader(source_node, max_retries=5)
+    assert reader_custom.max_retries == 5
+
+    # Test zero retries
+    reader_zero = FileReader(source_node, max_retries=0)
+    assert reader_zero.max_retries == 0
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_zero_retries(mock_sleep, mock_smart_open):
+    """Test retry logic with zero retries (should fail immediately)."""
+    # Mock smart_open to fail
+    mock_smart_open.side_effect = Exception("Connection timeout")
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    reader_node = FileReader(source_node, max_retries=0)
+
+    # Should fail immediately without retrying
+    with pytest.raises(Exception, match="Connection timeout"):
+        next(reader_node)
+
+    # Verify sleep was never called
+    mock_sleep.assert_not_called()
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_break_on_success(mock_sleep, mock_smart_open):
+    """Test that the loop breaks immediately on successful file opening."""
+    # Mock smart_open to succeed on first attempt
+    mock_smart_open.return_value.__enter__.return_value.read.return_value = "success_content"
+    mock_smart_open.return_value.__exit__.return_value = None
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    reader_node = FileReader(source_node, max_retries=3)
+
+    # Should succeed immediately
+    content = next(reader_node)
+    assert content[FileReader.DATA_KEY] == "success_content"
+
+    # Verify sleep was never called (no retries needed)
+    mock_sleep.assert_not_called()
+
+    # Verify smart_open was called exactly once
+    assert mock_smart_open.call_count == 1
+
+
+@patch("smart_open.open")
+@patch("time.sleep")
+def test_retry_logic_reading_error_not_retried(mock_sleep, mock_smart_open):
+    """Test that reading errors are not retried (only opening errors are retried)."""
+    # Mock smart_open to succeed on opening but fail on reading
+    mock_file = MagicMock()
+    mock_file.read.side_effect = Exception("Reading error")
+    mock_smart_open.return_value.__enter__.return_value = mock_file
+    mock_smart_open.return_value.__exit__.return_value = None
+
+    file_paths = ["s3://bucket/test.txt"]
+    source_node = MockSourceNode(file_paths)
+    reader_node = FileReader(source_node, max_retries=3)
+
+    # Should fail immediately on reading error (no retries)
+    with pytest.raises(Exception, match="Reading error"):
+        next(reader_node)
+
+    # Verify sleep was never called (no retries for reading errors)
+    mock_sleep.assert_not_called()
+
+    # Verify smart_open was called exactly once
+    assert mock_smart_open.call_count == 1
+
+
+def test_file_reader_metadata_preservation():
+    """Test that metadata from source node is properly preserved."""
+    file_paths = ["test.txt"]
+    source_metadata = {"source": "test", "batch": 1, "custom_key": "custom_value"}
+    source_node = MockSourceNode(file_paths, source_metadata)
+
+    with patch("smart_open.open") as mock_smart_open:
+        mock_smart_open.return_value.__enter__.return_value.read.return_value = "test content"
+        mock_smart_open.return_value.__exit__.return_value = None
+
+        reader_node = FileReader(source_node)
+        result = next(reader_node)
+
+        # Check that source metadata is preserved
+        assert result[FileReader.METADATA_KEY]["source"] == "test"
+        assert result[FileReader.METADATA_KEY]["batch"] == 1
+        assert result[FileReader.METADATA_KEY]["custom_key"] == "custom_value"
+        assert result[FileReader.METADATA_KEY]["file_path"] == "test.txt"

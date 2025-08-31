@@ -1,10 +1,32 @@
 import logging
+import time
 from typing import Any, Dict, Optional
 
-from smart_open import open
+import smart_open
 from torchdata.nodes import BaseNode
 
 logger = logging.getLogger(__name__)
+
+
+def _fibonacci_backoff(attempt: int, base_delay: float = 1.0) -> float:
+    """Calculate Fibonacci backoff delay for retry attempts.
+
+    Args:
+        attempt: Current attempt number (1-based)
+        base_delay: Base delay in seconds
+
+    Returns:
+        float: Delay in seconds before next retry
+    """
+    if attempt <= 0:
+        return 0.0
+
+    # Fibonacci sequence: 1, 1, 2, 3, 5, 8, 13, 21, ...
+    fib_sequence = [1, 1]
+    for i in range(2, attempt + 1):
+        fib_sequence.append(fib_sequence[i - 1] + fib_sequence[i - 2])
+
+    return base_delay * fib_sequence[attempt - 1]
 
 
 class FileReader(BaseNode[Dict]):
@@ -19,6 +41,7 @@ class FileReader(BaseNode[Dict]):
     - Maintains state for checkpointing and resumption
     - Preserves metadata from source nodes
     - Works with both text and binary files
+    - Automatic retry with Fibonacci backoff for any errors
 
     Output format:
         {
@@ -36,10 +59,11 @@ class FileReader(BaseNode[Dict]):
         >>> # Read from local files
         >>> node = FileReader(source_node)
         >>>
-        >>> # Read from S3 with custom client
+        >>> # Read from S3 with custom client and retry logic
         >>> node = FileReader(
         ...     source_node,
-        ...     transport_params={'client': boto3.client('s3')}
+        ...     transport_params={'client': boto3.client('s3')},
+        ...     max_retries=5
         ... )
         >>>
         >>> # Read binary files
@@ -62,6 +86,7 @@ class FileReader(BaseNode[Dict]):
         mode: str = "r",
         encoding: Optional[str] = "utf-8",
         transport_params: Optional[Dict] = None,
+        max_retries: int = 3,
     ):
         """Initialize the FileReader.
 
@@ -76,12 +101,14 @@ class FileReader(BaseNode[Dict]):
                     {'compression': '.gz'}  # Force gzip compression
                     {'compression': '.bz2'}  # Force bz2 compression
                     {'compression': 'disable'}  # Disable compression
+            max_retries: Maximum number of retry attempts for any errors (default: 3)
         """
         super().__init__()
         self.source = source_node
         self.mode = mode
         self.encoding = encoding
         self.transport_params = transport_params or {}
+        self.max_retries = max_retries
 
     def reset(self, initial_state: Optional[Dict[str, Any]] = None):
         """Reset must fully initialize the node's state.
@@ -105,28 +132,41 @@ class FileReader(BaseNode[Dict]):
         # Preserve metadata from source
         source_metadata = file_path_item.get(self.METADATA_KEY, {})
 
-        try:
-            # Use smart_open to handle any file system
-            with open(
-                file_path,
-                self.mode,
-                encoding=None if "b" in self.mode else self.encoding,
-                transport_params=self.transport_params,
-            ) as f:
-                content = f.read()
+        content = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                with smart_open.open(
+                    file_path,
+                    self.mode,
+                    encoding=None if "b" in self.mode else self.encoding,
+                    transport_params=self.transport_params,
+                ) as f:
+                    content = f.read()
 
-            # Create output with metadata
-            metadata = {"file_path": file_path}
+                    break
+            except Exception as e:
+                if attempt < self.max_retries:
+                    delay = _fibonacci_backoff(attempt)
+                    logger.warning(
+                        f"Error opening {file_path} (attempt {attempt}/{self.max_retries}): {e}. Retrying in {delay:.2f}s..."
+                    )
+                    time.sleep(delay)
+                else:
+                    # Max retries reached
+                    logger.error(f"Failed to open {file_path} after {self.max_retries} attempts. Last error: {e}")
+                    raise
 
-            # Include metadata from source
-            if source_metadata:
-                metadata.update(source_metadata)
+        if content is None:
+            # This should never happen since we raise in the except block above
+            # But just in case, provide a generic error
+            raise Exception(f"Failed to read content from {file_path}")
 
-            return {self.DATA_KEY: content, self.METADATA_KEY: metadata}
+        metadata = {"file_path": file_path}
+        # Include metadata from source
+        if source_metadata:
+            metadata.update(source_metadata)
 
-        except Exception as e:
-            logger.error(f"Error reading {file_path}: {e}")
-            raise
+        return {self.DATA_KEY: content, self.METADATA_KEY: metadata}
 
     def get_state(self) -> Dict[str, Any]:
         """Return the current state of the node."""
