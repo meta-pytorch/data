@@ -58,6 +58,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
     DATA_KEY = "data"
     METADATA_KEY = "metadata"
     CURRENT_FILE_KEY = "current_file"
+    CURRENT_LINE_KEY = "current_line"
 
     def __init__(
         self,
@@ -113,7 +114,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
             # Restore source state
             self.source.reset(initial_state[self.SOURCE_KEY])
             self._current_file = initial_state[self.CURRENT_FILE_KEY]
-            self._current_line = initial_state.get("current_line", 0)
+            self._current_line = initial_state.get(self.CURRENT_LINE_KEY, 0)
             self._source_metadata = initial_state.get(self.METADATA_KEY, {})
 
             # If we have a file to resume, open and seek to position
@@ -229,5 +230,5 @@ class TextStreamingDecoder(BaseNode[Dict]):
         return {
             self.SOURCE_KEY: self.source.state_dict(),
             self.CURRENT_FILE_KEY: self._current_file,
-            "current_line": self._current_line,
+            self.CURRENT_LINE_KEY: self._current_line,
         }
