@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, Optional, Union
 
-from smart_open import open
+import smart_open
 from torchdata.nodes import BaseNode
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
 
             # If we have a file to resume, open and seek to position
             if self._current_file is not None:
-                self._file_handle = open(
+                self._file_handle = smart_open.open(
                     self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
                 )
                 # Skip lines to resume position
@@ -156,7 +156,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
 
             try:
                 # Open the file
-                self._file_handle = open(
+                self._file_handle = smart_open.open(
                     self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
                 )
                 self._current_line = 0
@@ -232,3 +232,9 @@ class TextStreamingDecoder(BaseNode[Dict]):
             self.CURRENT_FILE_KEY: self._current_file,
             self.CURRENT_LINE_KEY: self._current_line,
         }
+
+    def shutdown(self):
+        """Shutdown the node."""
+        if self._file_handle is not None:
+            self._file_handle.close()
+            self._file_handle = None
