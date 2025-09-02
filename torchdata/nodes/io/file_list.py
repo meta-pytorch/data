@@ -8,6 +8,19 @@ from torchdata.nodes import BaseNode
 logger = logging.getLogger(__name__)
 
 
+def _normalize_path(path: str) -> str:
+    """Normalize path separators to forward slashes for cross-platform consistency.
+
+    Args:
+        path: File path that may contain platform-specific separators
+
+    Returns:
+        str: Path with forward slash separators
+    """
+    # Convert backslashes to forward slashes for consistency
+    return path.replace("\\", "/")
+
+
 class FileLister(BaseNode[Dict]):
     """Node that lists files from any fsspec-supported filesystem matching specified patterns.
 
@@ -102,6 +115,9 @@ class FileLister(BaseNode[Dict]):
 
             # Convert to sorted list for deterministic ordering
             self._file_paths = sorted(self._file_paths)
+
+            # Normalize all paths to use forward slashes for cross-platform consistency
+            self._file_paths = [_normalize_path(path) for path in self._file_paths]
 
             # For non-file protocols, ensure URIs are properly formatted
             if self.protocol != "file":

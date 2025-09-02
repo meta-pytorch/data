@@ -70,8 +70,11 @@ def test_local_file_list_all_files(sample_local_files):
     # Verify the count (should match all files except subdirectory itself)
     assert len(file_paths) == len(expected_files)
 
+    # Normalize expected files to forward slashes for cross-platform consistency
+    normalized_expected_files = [expected_file.replace("\\", "/") for expected_file in expected_files]
+
     # Check if all expected files are in the result
-    for expected_file in expected_files:
+    for expected_file in normalized_expected_files:
         assert expected_file in file_paths
 
 
@@ -90,6 +93,8 @@ def test_local_file_list_specific_pattern(sample_local_files):
     assert len(file_paths) == 3  # 3 txt files in the root directory
     for file_path in file_paths:
         assert file_path.endswith(".txt")
+        # Ensure paths use forward slashes
+        assert "\\" not in file_path
 
     # Test with multiple patterns
     node = FileLister(tmp_dir, ["*.json", "*.csv"])
