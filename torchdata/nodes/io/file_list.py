@@ -129,9 +129,30 @@ class FileLister(BaseNode[Dict]):
 
         self._current_idx = 0
 
-        # If there's an initial state, restore position
+        # If there's an initial state, restore position and validate
         if initial_state:
+            # Validate that the number of files matches
+            saved_num_files = initial_state.get("num_files")
+            current_num_files = len(self._file_paths)
+
+            if saved_num_files != current_num_files:
+                raise ValueError(
+                    f"State validation failed: saved state has {saved_num_files} files, "
+                    f"but current filesystem has {current_num_files} files. "
+                    f"This indicates the filesystem has changed between runs. "
+                    f"Please reset the node without initial state to start fresh."
+                )
+
+            # Restore current index and validate bounds
             self._current_idx = initial_state.get(self.CURRENT_IDX_KEY, 0)
+
+            if self._current_idx >= len(self._file_paths):
+                raise ValueError(
+                    f"State validation failed: saved index {self._current_idx} is out of bounds "
+                    f"for current file list (length: {len(self._file_paths)}). "
+                    f"This indicates the filesystem has changed between runs. "
+                    f"Please reset the node without initial state to start fresh."
+                )
 
     def next(self) -> Dict:
         """Get the next file path."""
@@ -151,4 +172,4 @@ class FileLister(BaseNode[Dict]):
 
     def get_state(self) -> Dict[str, Any]:
         """Get current state for checkpointing."""
-        return {self.CURRENT_IDX_KEY: self._current_idx}
+        return {self.CURRENT_IDX_KEY: self._current_idx, "num_files": len(self._file_paths)}

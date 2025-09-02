@@ -261,3 +261,246 @@ def test_s3_file_list_error(mock_filesystem):
     # Should not raise exception, but log error and return empty list
     file_items = list(node)
     assert len(file_items) == 0
+
+
+def test_file_list_state_management(sample_local_files):
+    """Test state management in FileLister."""
+    tmp_dir, _ = sample_local_files
+
+    # Create a FileLister
+    node = FileLister(tmp_dir, ["**/*"])
+
+    # Read first file and store state
+    first_item = next(iter(node))
+    state = node.get_state()
+
+    # Verify state contains expected keys
+    assert "current_idx" in state
+    assert "num_files" in state
+    assert state["current_idx"] == 1  # After reading first item
+    assert state["num_files"] > 0
+
+    # Create new node and restore state
+    new_node = FileLister(tmp_dir, ["**/*"])
+    new_node.reset(state)
+
+    # Should continue from second file
+    second_item = next(iter(new_node))
+    assert second_item["data"] != first_item["data"]
+
+
+def test_file_list_state_validation_num_files_mismatch(sample_local_files):
+    """Test that state validation fails when number of files changes."""
+    tmp_dir, _ = sample_local_files
+
+    # Create a FileLister and get initial state
+    node = FileLister(tmp_dir, ["**/*"])
+    initial_state = node.get_state()
+
+    # Modify the state to have wrong number of files
+    corrupted_state = initial_state.copy()
+    corrupted_state["num_files"] = initial_state["num_files"] + 1
+
+    # Create new node and try to restore corrupted state
+    new_node = FileLister(tmp_dir, ["**/*"])
+
+    with pytest.raises(ValueError, match="State validation failed: saved state has"):
+        new_node.reset(corrupted_state)
+
+
+def test_file_list_state_validation_index_out_of_bounds(sample_local_files):
+    """Test that state validation fails when index is out of bounds."""
+    tmp_dir, _ = sample_local_files
+
+    # Create a FileLister and get initial state
+    node = FileLister(tmp_dir, ["**/*"])
+    initial_state = node.get_state()
+
+    # Modify the state to have invalid index
+    corrupted_state = initial_state.copy()
+    corrupted_state["current_idx"] = initial_state["num_files"] + 10  # Way out of bounds
+
+    # Create new node and try to restore corrupted state
+    new_node = FileLister(tmp_dir, ["**/*"])
+
+    with pytest.raises(ValueError, match="State validation failed: saved index"):
+        new_node.reset(corrupted_state)
+
+
+def test_file_list_protocol_handling():
+    """Test that FileLister correctly handles different protocols."""
+    # Test local filesystem
+    with patch("fsspec.filesystem") as mock_fs_class:
+        mock_fs = MagicMock()
+        mock_fs_class.return_value = mock_fs
+        mock_fs.glob.return_value = ["file1.txt", "file2.txt"]
+        mock_fs.isfile.return_value = True
+
+        node = FileLister("local/path", ["*"])
+        node.reset()
+
+        # Should not add protocol prefix for local files
+        file_paths = [item["data"] for item in node]
+        assert all(not path.startswith("file://") for path in file_paths)
+        assert all("/" in path for path in file_paths)  # Should have forward slashes
+
+
+def test_file_list_s3_protocol_handling():
+    """Test that FileLister correctly handles S3 protocol."""
+    with patch("fsspec.filesystem") as mock_fs_class:
+        mock_fs = MagicMock()
+        mock_fs_class.return_value = mock_fs
+        mock_fs.glob.return_value = ["key1.txt", "key2.txt"]
+        mock_fs.isfile.return_value = True
+
+        node = FileLister("s3://bucket/prefix", ["*"])
+        node.reset()
+
+        # Should add S3 protocol prefix
+        file_paths = [item["data"] for item in node]
+        assert all(path.startswith("s3://") for path in file_paths)
+        assert all("/" in path for path in file_paths)  # Should have forward slashes
+
+
+def test_file_list_directory_filtering():
+    """Test that FileLister correctly filters out directories."""
+    with patch("fsspec.filesystem") as mock_fs_class:
+        mock_fs = MagicMock()
+        mock_fs_class.return_value = mock_fs
+
+        # Mock glob to return both files and directories
+        mock_fs.glob.return_value = ["file1.txt", "dir1", "file2.txt", "dir2"]
+        mock_fs.isfile.side_effect = lambda x: x.endswith(".txt")  # Only .txt files are files
+
+        node = FileLister("test/path", ["**/*"])
+        node.reset()
+
+        # Should only get files, not directories
+        file_paths = [item["data"] for item in node]
+        assert len(file_paths) == 2
+        assert all(path.endswith(".txt") for path in file_paths)
+
+
+def test_file_list_empty_directory():
+    """Test FileLister behavior with empty directory."""
+    with patch("fsspec.filesystem") as mock_fs_class:
+        mock_fs = MagicMock()
+        mock_fs_class.return_value = mock_fs
+        mock_fs.glob.return_value = []
+
+        node = FileLister("empty/path", ["*"])
+        node.reset()
+
+        # Should handle empty directory gracefully
+        with pytest.raises(StopIteration):
+            next(iter(node))
+
+
+def test_file_list_glob_error_handling():
+    """Test that FileLister handles glob errors gracefully."""
+    with patch("fsspec.filesystem") as mock_fs_class:
+        mock_fs = MagicMock()
+        mock_fs_class.return_value = mock_fs
+        mock_fs.glob.side_effect = Exception("Glob error")
+
+        node = FileLister("error/path", ["*"])
+        node.reset()
+
+        # Should handle glob errors gracefully
+        with pytest.raises(StopIteration):
+            next(iter(node))
+
+
+def test_file_list_multiple_patterns():
+    """Test FileLister with multiple patterns."""
+    with patch("fsspec.filesystem") as mock_fs_class:
+        mock_fs = MagicMock()
+        mock_fs_class.return_value = mock_fs
+
+        # Mock different patterns returning different files
+        def mock_glob(pattern):
+            if "*.txt" in pattern:
+                return ["file1.txt", "file2.txt"]
+            elif "*.json" in pattern:
+                return ["data1.json"]
+            else:
+                return []
+
+        mock_fs.glob.side_effect = mock_glob
+        mock_fs.isfile.return_value = True
+
+        node = FileLister("test/path", ["*.txt", "*.json"])
+        node.reset()
+
+        # Should get files from all patterns
+        file_paths = [item["data"] for item in node]
+        assert len(file_paths) == 3
+        assert any(path.endswith(".txt") for path in file_paths)
+        assert any(path.endswith(".json") for path in file_paths)
+
+
+def test_file_list_path_normalization():
+    """Test that FileLister normalizes paths correctly."""
+    with patch("fsspec.filesystem") as mock_fs_class:
+        mock_fs = MagicMock()
+        mock_fs_class.return_value = mock_fs
+
+        # Mock paths with backslashes (Windows-style)
+        mock_fs.glob.return_value = ["C:\\Users\\test\\file1.txt", "C:\\Users\\test\\file2.txt"]
+        mock_fs.isfile.return_value = True
+
+        node = FileLister("C:\\Users\\test", ["*"])
+        node.reset()
+
+        # Should normalize to forward slashes
+        file_paths = [item["data"] for item in node]
+        assert all("\\" not in path for path in file_paths)
+        assert all("/" in path for path in file_paths)
+        assert all(path.startswith("C:/") for path in file_paths)
+
+
+def test_file_list_state_consistency():
+    """Test that state is consistent across multiple operations."""
+    tmp_dir, _ = sample_local_files
+
+    # Create a FileLister
+    node = FileLister(tmp_dir, ["**/*"])
+
+    # Get initial state
+    initial_state = node.get_state()
+    initial_num_files = initial_state["num_files"]
+    initial_idx = initial_state["current_idx"]
+
+    # Read a few items
+    for _ in range(3):
+        next(iter(node))
+
+    # Get updated state
+    updated_state = node.get_state()
+    updated_num_files = updated_state["num_files"]
+    updated_idx = updated_state["current_idx"]
+
+    # Number of files should remain the same
+    assert updated_num_files == initial_num_files
+
+    # Index should have increased
+    assert updated_idx == initial_idx + 3
+
+
+def test_file_list_reset_without_state():
+    """Test that reset without state works correctly."""
+    tmp_dir, _ = sample_local_files
+
+    # Create a FileLister
+    node = FileLister(tmp_dir, ["**/*"])
+
+    # Read some items
+    for _ in range(2):
+        next(iter(node))
+
+    # Reset without state
+    node.reset()
+
+    # Should start from beginning
+    first_item = next(iter(node))
+    assert first_item["metadata"]["fs_protocol"] == "file"
