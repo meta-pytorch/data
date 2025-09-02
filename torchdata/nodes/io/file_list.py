@@ -86,15 +86,15 @@ class FileLister(BaseNode[Dict]):
         self.fs = fsspec.filesystem(self.protocol, **self.fs_options)
 
         # Initialize state
-        self._file_paths = None
+        self._file_paths = []
         self._current_idx = 0
 
     def reset(self, initial_state: Optional[Dict[str, Any]] = None):
         """Reset node state and populate file paths."""
         super().reset(initial_state)
 
-        # Always initialize files list
-        self._file_paths = set()
+        # Use local variable for set operations during file discovery
+        file_paths_set = set()
 
         try:
             # Use fsspec's glob for file discovery
@@ -108,13 +108,13 @@ class FileLister(BaseNode[Dict]):
                     if pattern == "**/*" or pattern == "*":
                         matches = [match for match in matches if self.fs.isfile(match)]
 
-                    self._file_paths.update(matches)
+                    file_paths_set.update(matches)
 
                 except Exception as e:
                     logger.warning(f"Error globbing pattern {pattern}: {e}")
 
             # Convert to sorted list for deterministic ordering
-            self._file_paths = sorted(self._file_paths)
+            self._file_paths = sorted(file_paths_set)
 
             # Normalize all paths to use forward slashes for cross-platform consistency
             self._file_paths = [_normalize_path(path) for path in self._file_paths]
