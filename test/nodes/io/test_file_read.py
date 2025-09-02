@@ -406,10 +406,9 @@ def test_retry_logic_max_retries_exceeded(mock_sleep, mock_smart_open):
     with pytest.raises(Exception, match="Connection timeout"):
         next(reader_node)
 
-    # Verify sleep was called twice
-    assert mock_sleep.call_count == 2
-    mock_sleep.assert_any_call(1.0)  # First retry delay
-    mock_sleep.assert_any_call(1.0)  # Second retry delay
+    # Verify sleep was called once (only before the second attempt)
+    assert mock_sleep.call_count == 1
+    mock_sleep.assert_any_call(1.0)  # Only retry delay
 
 
 @patch("smart_open.open")
@@ -427,10 +426,9 @@ def test_retry_logic_file_not_found(mock_sleep, mock_smart_open):
     with pytest.raises(Exception, match="File not found"):
         next(reader_node)
 
-    # Verify sleep was called twice (retries on any error)
-    assert mock_sleep.call_count == 2
-    mock_sleep.assert_any_call(1.0)  # First retry delay
-    mock_sleep.assert_any_call(1.0)  # Second retry delay
+    # Verify sleep was called once (only before the second attempt)
+    assert mock_sleep.call_count == 1
+    mock_sleep.assert_any_call(1.0)  # Only retry delay
 
 
 def test_file_reader_custom_max_retries():
@@ -496,7 +494,7 @@ def test_retry_logic_break_on_success(mock_sleep, mock_smart_open):
 @patch("smart_open.open")
 @patch("time.sleep")
 def test_retry_logic_reading_error_not_retried(mock_sleep, mock_smart_open):
-    """Test that reading errors are not retried (only opening errors are retried)."""
+    """Test that reading errors are retried (any exception is retried)."""
     # Mock smart_open to succeed on opening but fail on reading
     mock_file = MagicMock()
     mock_file.read.side_effect = Exception("Reading error")
@@ -507,15 +505,17 @@ def test_retry_logic_reading_error_not_retried(mock_sleep, mock_smart_open):
     source_node = MockSourceNode(file_paths)
     reader_node = FileReader(source_node, max_retries=3)
 
-    # Should fail immediately on reading error (no retries)
+    # Should retry on reading error (any exception is retried)
     with pytest.raises(Exception, match="Reading error"):
         next(reader_node)
 
-    # Verify sleep was never called (no retries for reading errors)
-    mock_sleep.assert_not_called()
+    # Verify sleep was called (retries on any error)
+    assert mock_sleep.call_count == 2  # 2 retries before final failure
+    mock_sleep.assert_any_call(1.0)  # First retry delay
+    mock_sleep.assert_any_call(1.0)  # Second retry delay
 
-    # Verify smart_open was called exactly once
-    assert mock_smart_open.call_count == 1
+    # Verify smart_open was called multiple times due to retries
+    assert mock_smart_open.call_count == 3  # 1 initial + 2 retries
 
 
 def test_file_reader_metadata_preservation():

@@ -133,7 +133,8 @@ class FileReader(BaseNode[Dict]):
         source_metadata = file_path_item.get(self.METADATA_KEY, {})
 
         content = None
-        for attempt in range(1, self.max_retries + 1):
+        # Single loop handles both zero retries and normal retries
+        for attempt in range(0, self.max_retries + 1):
             try:
                 with smart_open.open(
                     file_path,
@@ -142,18 +143,18 @@ class FileReader(BaseNode[Dict]):
                     transport_params=self.transport_params,
                 ) as f:
                     content = f.read()
-
                     break
             except Exception as e:
                 if attempt < self.max_retries:
-                    delay = _fibonacci_backoff(attempt)
+                    # This is a retry attempt, sleep before next try
+                    delay = _fibonacci_backoff(attempt + 1)  # +1 because attempt starts at 0
                     logger.warning(
-                        f"Error opening {file_path} (attempt {attempt}/{self.max_retries}): {e}. Retrying in {delay:.2f}s..."
+                        f"Error opening {file_path} (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay:.2f}s..."
                     )
                     time.sleep(delay)
                 else:
-                    # Max retries reached
-                    logger.error(f"Failed to open {file_path} after {self.max_retries} attempts. Last error: {e}")
+                    # This is the final attempt, no more retries
+                    logger.error(f"Failed to open {file_path} after {self.max_retries + 1} attempts. Last error: {e}")
                     raise
 
         if content is None:
