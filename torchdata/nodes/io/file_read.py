@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-import smart_open
+import smart_open  # type: ignore[import-untyped]
 from torchdata.nodes import BaseNode
 
 logger = logging.getLogger(__name__)
