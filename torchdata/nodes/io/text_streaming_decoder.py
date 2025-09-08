@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Any, Dict, Optional, Union
 
-import smart_open
+import smart_open  # type: ignore[import-untyped]
 from torchdata.nodes import BaseNode
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
         source_node: BaseNode[Union[str, Dict]],
         mode: str = "r",
         encoding: Optional[str] = "utf-8",
-        transport_params: Optional[Dict] = None,
+        transport_params: Optional[Dict[str, Any]] = None,
         max_retries: int = 3,
     ):
         """Initialize the TextStreamingDecoder.
@@ -105,7 +105,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
                     {'compression': '.gz'}  # Force gzip compression
                     {'compression': '.bz2'}  # Force bz2 compression
                     {'compression': 'disable'}  # Disable compression
-            max_retries: Maximum number of retry attempts for file opening errors (default: 3)
+            max_retries: Maximum number of retry attempts for any errors (default: 3)
         """
         super().__init__()
         self.source = source_node
@@ -113,10 +113,10 @@ class TextStreamingDecoder(BaseNode[Dict]):
         self.encoding = encoding
         self.transport_params = transport_params or {}
         self.max_retries = max_retries
-        self._current_file = None
+        self._current_file: Optional[str] = None
         self._current_line = 0
-        self._file_handle = None
-        self._source_metadata = {}
+        self._file_handle: Optional[Any] = None
+        self._source_metadata: Dict[str, Any] = {}
 
     def reset(self, initial_state: Optional[Dict[str, Any]] = None):
         """Reset must fully initialize the node's state.
@@ -195,13 +195,21 @@ class TextStreamingDecoder(BaseNode[Dict]):
 
             # Extract file path from data
             if isinstance(file_data, dict) and self.DATA_KEY in file_data:
-                self._current_file = file_data[self.DATA_KEY]
+                file_path = file_data[self.DATA_KEY]
+                if isinstance(file_path, str):
+                    self._current_file = file_path
+                else:
+                    logger.error(f"Invalid file path type: {type(file_path)}, expected str")
+                    return False
                 # Copy metadata from source
                 if self.METADATA_KEY in file_data:
                     self._source_metadata = file_data[self.METADATA_KEY]
-            else:
+            elif isinstance(file_data, str):
                 self._current_file = file_data
                 self._source_metadata = {}
+            else:
+                logger.error(f"Invalid file data type: {type(file_data)}")
+                return False
 
             # Retry logic for file opening
             for attempt in range(1, self.max_retries + 1):
@@ -228,19 +236,29 @@ class TextStreamingDecoder(BaseNode[Dict]):
                         self._file_handle = None
                         return False  # Failed to open file
 
-        except StopIteration:
-            # No more files
-            raise
+            # This should never be reached, but mypy needs it
+            return False
 
-    def _get_next_line(self) -> Dict:
+        except StopIteration:
+            # No more files - this should propagate up to stop iteration
+            raise
+        except Exception as e:
+            # Any other unexpected error
+            logger.error(f"Unexpected error in _get_next_file: {e}")
+            return False
+
+    def _get_next_line(self) -> Optional[Dict[str, Any]]:
         """Read the next line from the current file.
 
         Returns:
-            Dict: Dictionary with the line data and metadata.
+            Optional[Dict[str, Any]]: Dictionary with the line data and metadata, or None if end of file or error.
 
         Raises:
             StopIteration: If end of file is reached and no more files are available.
         """
+        if self._file_handle is None:
+            return None
+
         try:
             line = self._file_handle.readline()
 
@@ -268,7 +286,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
             self._file_handle = None
             return None  # Signal error
 
-    def next(self) -> Dict:
+    def next(self) -> Dict[str, Any]:
         """Get the next line from current file or next available file."""
         # Loop until we get a valid line or run out of files
         while True:
