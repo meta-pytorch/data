@@ -86,7 +86,7 @@ class FileLister(BaseNode[Dict]):
         self.fs = fsspec.filesystem(self.protocol, **self.fs_options)
 
         # Initialize state
-        self._file_paths = []
+        self._file_paths: List[str] = []
         self._current_idx = 0
 
     def reset(self, initial_state: Optional[Dict[str, Any]] = None):
@@ -108,7 +108,17 @@ class FileLister(BaseNode[Dict]):
                     if pattern == "**/*" or pattern == "*":
                         matches = [match for match in matches if self.fs.isfile(match)]
 
-                    file_paths_set.update(matches)
+                    # For local filesystem, ensure matches include the base path when relative
+                    normalized_matches: List[str] = []
+                    for match in matches:
+                        candidate = match
+                        if self.protocol == "file":
+                            has_scheme = "://" in match
+                            if not has_scheme and not os.path.isabs(match) and not match.startswith(self.uri_base):
+                                candidate = os.path.join(self.uri_base, match)
+                        normalized_matches.append(candidate)
+
+                    file_paths_set.update(normalized_matches)
 
                 except Exception as e:
                     logger.warning(f"Error globbing pattern {pattern}: {e}")

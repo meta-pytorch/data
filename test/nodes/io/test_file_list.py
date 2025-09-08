@@ -314,10 +314,12 @@ def test_file_list_state_validation_index_out_of_bounds(sample_local_files):
 
     # Create a FileLister and get initial state
     node = FileLister(tmp_dir, ["**/*"])
+    # Populate file listing
+    list(node)
     initial_state = node.get_state()
 
-    # Modify the state to have invalid index
-    corrupted_state = initial_state.copy()
+    # Modify the state to have invalid index but keep num_files matching
+    corrupted_state = {**initial_state}
     corrupted_state["current_idx"] = initial_state["num_files"] + 10  # Way out of bounds
 
     # Create new node and try to restore corrupted state
@@ -342,6 +344,7 @@ def test_file_list_protocol_handling():
         # Should not add protocol prefix for local files
         file_paths = [item["data"] for item in node]
         assert all(not path.startswith("file://") for path in file_paths)
+        assert all("\\" not in path for path in file_paths)
         assert all("/" in path for path in file_paths)  # Should have forward slashes
 
 
@@ -459,12 +462,15 @@ def test_file_list_path_normalization():
         assert all(path.startswith("C:/") for path in file_paths)
 
 
-def test_file_list_state_consistency():
+def test_file_list_state_consistency(sample_local_files):
     """Test that state is consistent across multiple operations."""
     tmp_dir, _ = sample_local_files
 
     # Create a FileLister
     node = FileLister(tmp_dir, ["**/*"])
+
+    # Initialize without consuming items so state has correct num_files
+    node.reset()
 
     # Get initial state
     initial_state = node.get_state()
@@ -487,7 +493,7 @@ def test_file_list_state_consistency():
     assert updated_idx == initial_idx + 3
 
 
-def test_file_list_reset_without_state():
+def test_file_list_reset_without_state(sample_local_files):
     """Test that reset without state works correctly."""
     tmp_dir, _ = sample_local_files
 
