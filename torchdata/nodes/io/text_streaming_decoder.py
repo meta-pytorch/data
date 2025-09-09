@@ -147,30 +147,38 @@ class TextStreamingDecoder(BaseNode[Dict]):
             # If we have a file to resume, open and seek to position
             if self._current_file is not None:
                 # Retry logic for file opening during state restoration
-                for attempt in range(1, self.max_retries + 1):
+                for attempt in range(0, self.max_retries + 1):
                     try:
-                        self._file_handle = smart_open.open(
+                        cm = smart_open.open(
                             self._current_file,
                             self.mode,
                             encoding=self.encoding,
                             transport_params=self.transport_params,
                         )
-                        # Skip lines to resume position
+                        # Prefer direct streaming handle when available
+                        if hasattr(cm, "readline"):
+                            self._file_handle = cm
+                        elif hasattr(cm, "__enter__"):
+                            self._file_handle = cm.__enter__()
+                        else:
+                            self._file_handle = cm
+                        # Skip lines to resume position using streaming readline
                         for _ in range(self._current_line):
-                            next(self._file_handle)
+                            _ = self._file_handle.readline()
                         break  # Successfully opened and positioned
 
                     except Exception as e:
-                        if attempt < self.max_retries:
-                            delay = _fibonacci_backoff(attempt)
+                        is_final = attempt >= self.max_retries
+                        if not is_final:
+                            delay = _fibonacci_backoff(attempt + 1)
                             logger.warning(
-                                f"Error opening {self._current_file} during state restoration (attempt {attempt}/{self.max_retries}): {e}. Retrying in {delay:.2f}s..."
+                                f"Error opening {self._current_file} during state restoration (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay:.2f}s..."
                             )
                             time.sleep(delay)
                         else:
                             # Max retries reached, log error and continue without file handle
                             logger.error(
-                                f"Failed to open {self._current_file} during state restoration after {self.max_retries} attempts. Last error: {e}"
+                                f"Failed to open {self._current_file} during state restoration after {self.max_retries + 1} attempts. Last error: {e}"
                             )
                             self._file_handle = None
                             break
@@ -212,32 +220,37 @@ class TextStreamingDecoder(BaseNode[Dict]):
                 return False
 
             # Retry logic for file opening
-            for attempt in range(1, self.max_retries + 1):
+            for attempt in range(0, self.max_retries + 1):
                 try:
                     # Try to open the file
-                    self._file_handle = smart_open.open(
+                    cm = smart_open.open(
                         self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
                     )
+                    # Prefer direct streaming handle when available
+                    if hasattr(cm, "readline"):
+                        self._file_handle = cm
+                    elif hasattr(cm, "__enter__"):
+                        self._file_handle = cm.__enter__()
+                    else:
+                        self._file_handle = cm
                     self._current_line = 0
                     return True
 
                 except Exception as e:
-                    if attempt < self.max_retries:
-                        delay = _fibonacci_backoff(attempt)
+                    is_final = attempt >= self.max_retries
+                    if not is_final:
+                        delay = _fibonacci_backoff(attempt + 1)
                         logger.warning(
-                            f"Error opening {self._current_file} (attempt {attempt}/{self.max_retries}): {e}. Retrying in {delay:.2f}s..."
+                            f"Error opening {self._current_file} (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay:.2f}s..."
                         )
                         time.sleep(delay)
                     else:
                         # Max retries reached
                         logger.error(
-                            f"Failed to open {self._current_file} after {self.max_retries} attempts. Last error: {e}"
+                            f"Failed to open {self._current_file} after {self.max_retries + 1} attempts. Last error: {e}"
                         )
                         self._file_handle = None
                         return False  # Failed to open file
-
-            # This should never be reached, but mypy needs it
-            return False
 
         except StopIteration:
             # No more files - this should propagate up to stop iteration
