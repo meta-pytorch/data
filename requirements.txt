@@ -1,3 +1,4 @@
 urllib3 >= 1.25
 requests
 smart_open
+fsspec
