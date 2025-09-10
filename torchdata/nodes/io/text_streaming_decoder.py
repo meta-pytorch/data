@@ -242,6 +242,9 @@ class TextStreamingDecoder(BaseNode[Dict]):
                         self._file_handle = None
                         return False  # Failed to open file
 
+            # If we get here, all retry attempts failed
+            return False
+
         except StopIteration:
             # No more files - this should propagate up to stop iteration
             raise
