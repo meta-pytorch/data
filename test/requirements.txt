@@ -9,3 +9,5 @@ awscli>=1.27.66
 psutil
 parameterized
 smart_open
+moto[s3]
+boto3
