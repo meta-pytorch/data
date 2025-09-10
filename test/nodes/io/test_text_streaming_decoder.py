@@ -248,10 +248,15 @@ def test_text_stream_cleanup():
 @patch("smart_open.open")
 def test_s3_basic_read(mock_smart_open):
     """Test basic S3 file reading with mocked smart_open."""
-    # Mock smart_open for S3
+    # Mock smart_open for S3 - set up context manager without readline attribute
     mock_file = MagicMock()
     mock_file.readline.side_effect = ['{"id": 1, "text": "Hello from S3"}\n', ""]
-    mock_smart_open.return_value.__enter__.return_value = mock_file
+
+    # Set up mock context manager
+    mock_context = MagicMock()
+    mock_context.__enter__.return_value = mock_file
+    mock_context.__exit__.return_value = None
+    mock_smart_open.return_value = mock_context
 
     file_paths = ["s3://test-bucket/test_file1.jsonl"]
     source_node = MockSourceNode(file_paths, {"source": "s3"})
@@ -274,10 +279,14 @@ def test_s3_basic_read(mock_smart_open):
 @patch("smart_open.open")
 def test_compression_handling(mock_smart_open):
     """Test compressed file handling."""
-    # Mock smart_open for compressed file
+    # Mock smart_open for compressed file - set up context manager without readline
     mock_file = MagicMock()
     mock_file.readline.side_effect = ["decompressed_line1\n", "decompressed_line2\n", ""]
-    mock_smart_open.return_value.__enter__.return_value = mock_file
+
+    mock_context = MagicMock()
+    mock_context.__enter__.return_value = mock_file
+    mock_context.__exit__.return_value = None
+    mock_smart_open.return_value = mock_context
 
     file_paths = ["s3://bucket/compressed.txt.gz"]
     source_node = MockSourceNode(file_paths, {"source": "s3"})
@@ -386,10 +395,14 @@ def test_text_stream_recursive_behavior():
 @patch("smart_open.open")
 def test_azure_gcs_support(mock_smart_open):
     """Test Azure and GCS support via smart_open."""
-    # Test Azure
+    # Test Azure - set up context manager without readline
     mock_file = MagicMock()
     mock_file.readline.side_effect = ["azure_content\n", ""]
-    mock_smart_open.return_value.__enter__.return_value = mock_file
+
+    mock_context = MagicMock()
+    mock_context.__enter__.return_value = mock_file
+    mock_context.__exit__.return_value = None
+    mock_smart_open.return_value = mock_context
 
     azure_paths = ["abfs://container@account.dfs.core.windows.net/file.txt"]
     source_node = MockSourceNode(azure_paths, {"source": "abfs"})
@@ -399,7 +412,7 @@ def test_azure_gcs_support(mock_smart_open):
     assert item[TextStreamingDecoder.DATA_KEY] == "azure_content"
     assert item[TextStreamingDecoder.METADATA_KEY]["source"] == "abfs"
 
-    # Test GCS
+    # Test GCS - reset mock file for new content
     mock_file.readline.side_effect = ["gcs_content\n", ""]
     gcs_paths = ["gs://my-bucket/file.txt"]
     source_node = MockSourceNode(gcs_paths, {"source": "gs"})
@@ -437,10 +450,17 @@ def test_retry_logic_success_after_failure(mock_sleep, mock_smart_open):
     mock_file = MagicMock()
     mock_file.readline.side_effect = ["success_line\n", ""]
 
+    # Set up successful context manager for third attempt
+    mock_context = MagicMock()
+    mock_context.__enter__.return_value = mock_file
+    mock_context.__exit__.return_value = None
+    # Explicitly delete readline from context manager to force __enter__ path
+    del mock_context.readline
+
     mock_smart_open.side_effect = [
         Exception("Connection timeout"),  # First attempt fails
         Exception("Network error"),  # Second attempt fails
-        mock_file,  # Third attempt succeeds
+        mock_context,  # Third attempt succeeds
     ]
 
     file_paths = ["s3://bucket/test.txt"]
@@ -504,42 +524,46 @@ def test_retry_logic_state_restoration(mock_sleep, mock_smart_open):
     """Test retry logic during state restoration."""
     # Mock smart_open to fail twice then succeed during state restoration
     mock_file = MagicMock()
-    mock_file.readline.side_effect = ["resumed_line\n", ""]
+    # First readline call for skipping to position, then actual content
+    mock_file.readline.side_effect = ["", "resumed_line\n", ""]
+
+    # Set up successful context manager for third attempt
+    mock_context = MagicMock()
+    mock_context.__enter__.return_value = mock_file
+    mock_context.__exit__.return_value = None
+    # Explicitly delete readline from context manager to force __enter__ path
+    del mock_context.readline
 
     mock_smart_open.side_effect = [
         Exception("Connection timeout"),  # First attempt fails
         Exception("Network error"),  # Second attempt fails
-        mock_file,  # Third attempt succeeds
+        mock_context,  # Third attempt succeeds
     ]
 
-    temp_dir, file_paths = create_test_files()
-    try:
-        source_node = MockSourceNode(file_paths)
-        node = TextStreamingDecoder(source_node, max_retries=3)
+    # Use mock file paths instead of real files to avoid conflicts
+    file_paths = ["mock://file1.txt"]
 
-        # Read first line and store state
-        first_item = next(iter(node))
-        state = node.get_state()
+    # Create a mock state that simulates having read one line already
+    mock_source_state = {"idx": 1}
+    state = {
+        TextStreamingDecoder.SOURCE_KEY: mock_source_state,
+        TextStreamingDecoder.CURRENT_FILE_KEY: file_paths[0],
+        TextStreamingDecoder.CURRENT_LINE_KEY: 1,  # Simulate having read one line
+    }
 
-        # Create new node and restore state (this will trigger retry logic)
-        new_source = MockSourceNode(file_paths)
-        new_node = TextStreamingDecoder(new_source, max_retries=3)
-        new_node.reset(state)
+    # Create new node and restore state (this will trigger retry logic)
+    new_source = MockSourceNode(file_paths)
+    new_node = TextStreamingDecoder(new_source, max_retries=3)
+    new_node.reset(state)
 
-        # Read next line - should succeed after retries
-        second_item = next(iter(new_node))
-        assert second_item[TextStreamingDecoder.DATA_KEY] != first_item[TextStreamingDecoder.DATA_KEY]
+    # Read next line - should succeed after retries
+    second_item = next(iter(new_node))
+    assert second_item[TextStreamingDecoder.DATA_KEY] == "resumed_line"
 
-        # Verify sleep was called twice during state restoration
-        assert mock_sleep.call_count == 2
-        mock_sleep.assert_any_call(1.0)  # First retry delay
-        mock_sleep.assert_any_call(1.0)  # Second retry delay
-
-    finally:
-        for path in file_paths:
-            if os.path.exists(path):
-                os.remove(path)
-        os.rmdir(temp_dir)
+    # Verify sleep was called twice during state restoration
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(1.0)  # First retry delay
+    mock_sleep.assert_any_call(1.0)  # Second retry delay
 
 
 def test_text_streaming_decoder_custom_max_retries():
@@ -567,7 +591,12 @@ def test_retry_logic_break_on_success(mock_sleep, mock_smart_open):
     # Mock smart_open to succeed on first attempt
     mock_file = MagicMock()
     mock_file.readline.side_effect = ["success_line\n", ""]
-    mock_smart_open.return_value = mock_file
+
+    # Set up successful context manager
+    mock_context = MagicMock()
+    mock_context.__enter__.return_value = mock_file
+    mock_context.__exit__.return_value = None
+    mock_smart_open.return_value = mock_context
 
     file_paths = ["s3://bucket/test.txt"]
     source_node = MockSourceNode(file_paths)

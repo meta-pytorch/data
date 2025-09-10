@@ -155,13 +155,8 @@ class TextStreamingDecoder(BaseNode[Dict]):
                             encoding=self.encoding,
                             transport_params=self.transport_params,
                         )
-                        # Prefer direct streaming handle when available
-                        if hasattr(cm, "readline"):
-                            self._file_handle = cm
-                        elif hasattr(cm, "__enter__"):
-                            self._file_handle = cm.__enter__()
-                        else:
-                            self._file_handle = cm
+                        # smart_open returns a context manager - enter it to get file handle
+                        self._file_handle = cm.__enter__()
                         # Skip lines to resume position using streaming readline
                         for _ in range(self._current_line):
                             _ = self._file_handle.readline()
@@ -226,13 +221,8 @@ class TextStreamingDecoder(BaseNode[Dict]):
                     cm = smart_open.open(
                         self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
                     )
-                    # Prefer direct streaming handle when available
-                    if hasattr(cm, "readline"):
-                        self._file_handle = cm
-                    elif hasattr(cm, "__enter__"):
-                        self._file_handle = cm.__enter__()
-                    else:
-                        self._file_handle = cm
+                    # smart_open returns a context manager - enter it to get file handle
+                    self._file_handle = cm.__enter__()
                     self._current_line = 0
                     return True
 
