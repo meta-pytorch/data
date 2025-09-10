@@ -116,7 +116,18 @@ class TextStreamingDecoder(BaseNode[Dict]):
         self._current_file: Optional[str] = None
         self._current_line = 0
         self._file_handle: Optional[Any] = None
+        self._context_manager: Optional[Any] = None  # Store context manager for proper cleanup
         self._source_metadata: Dict[str, Any] = {}
+
+    def _close_current_file(self):
+        """Close the current file and context manager properly."""
+        if self._context_manager is not None:
+            try:
+                self._context_manager.__exit__(None, None, None)
+            except Exception:
+                pass  # Ignore errors during cleanup
+            self._context_manager = None
+        self._file_handle = None
 
     def reset(self, initial_state: Optional[Dict[str, Any]] = None):
         """Reset must fully initialize the node's state.
@@ -127,9 +138,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
         super().reset(initial_state)
 
         # Close any open file
-        if self._file_handle is not None:
-            self._file_handle.close()
-            self._file_handle = None
+        self._close_current_file()
 
         if initial_state is None:
             # Full reset
@@ -156,6 +165,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
                             transport_params=self.transport_params,
                         )
                         # smart_open returns a context manager - enter it to get file handle
+                        self._context_manager = cm
                         self._file_handle = cm.__enter__()
                         # Skip lines to resume position using streaming readline
                         for _ in range(self._current_line):
@@ -222,6 +232,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
                         self._current_file, self.mode, encoding=self.encoding, transport_params=self.transport_params
                     )
                     # smart_open returns a context manager - enter it to get file handle
+                    self._context_manager = cm
                     self._file_handle = cm.__enter__()
                     self._current_line = 0
                     return True
@@ -239,7 +250,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
                         logger.error(
                             f"Failed to open {self._current_file} after {self.max_retries + 1} attempts. Last error: {e}"
                         )
-                        self._file_handle = None
+                        self._close_current_file()
                         return False  # Failed to open file
 
             # If we get here, all retry attempts failed
@@ -270,8 +281,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
 
             # EOF or empty line at end of file
             if not line:
-                self._file_handle.close()
-                self._file_handle = None
+                self._close_current_file()
                 return None  # Signal end of file
 
             # Create output with metadata
@@ -287,9 +297,7 @@ class TextStreamingDecoder(BaseNode[Dict]):
 
         except Exception as e:
             logger.error(f"Error reading from {self._current_file}: {e}")
-            if self._file_handle:
-                self._file_handle.close()
-            self._file_handle = None
+            self._close_current_file()
             return None  # Signal error
 
     def next(self) -> Dict[str, Any]:
@@ -321,6 +329,4 @@ class TextStreamingDecoder(BaseNode[Dict]):
 
     def shutdown(self):
         """Shutdown the node."""
-        if self._file_handle is not None:
-            self._file_handle.close()
-            self._file_handle = None
+        self._close_current_file()
