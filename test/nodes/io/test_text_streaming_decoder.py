@@ -108,6 +108,11 @@ def test_text_stream_basic():
         assert lines == ["line1", "line2", "line3", "file2_line1", "file2_line2"]
 
     finally:
+        # Ensure file handles are released on all platforms
+        try:
+            node.shutdown()
+        except Exception:
+            pass
         for path in file_paths:
             if os.path.exists(path):
                 os.remove(path)
@@ -132,6 +137,11 @@ def test_text_stream_metadata():
         assert item[TextStreamingDecoder.METADATA_KEY]["source"] == "local"
 
     finally:
+        # Ensure file handles are released before deleting on Windows
+        try:
+            node.shutdown()
+        except Exception:
+            pass
         for path in file_paths:
             if os.path.exists(path):
                 os.remove(path)
@@ -162,6 +172,15 @@ def test_text_stream_state_management():
         assert second_item[TextStreamingDecoder.METADATA_KEY]["item_idx"] == 1
 
     finally:
+        # Ensure both original and restored nodes release file handles
+        try:
+            node.shutdown()
+        except Exception:
+            pass
+        try:
+            new_node.shutdown()
+        except Exception:
+            pass
         for path in file_paths:
             if os.path.exists(path):
                 os.remove(path)
@@ -191,6 +210,11 @@ def test_text_stream_empty_file():
         assert item[TextStreamingDecoder.DATA_KEY] == "normal_content"
 
     finally:
+        # Ensure file handles are released before deleting on Windows
+        try:
+            node.shutdown()
+        except Exception:
+            pass
         for path in [empty_file, normal_file]:
             if os.path.exists(path):
                 os.remove(path)
@@ -216,6 +240,11 @@ def test_text_stream_encoding():
         assert item[TextStreamingDecoder.DATA_KEY] == "Hello 世界"
 
     finally:
+        # Ensure file handles are released before deleting on Windows
+        try:
+            node.shutdown()
+        except Exception:
+            pass
         if os.path.exists(utf8_file):
             os.remove(utf8_file)
         os.rmdir(temp_dir)
@@ -323,6 +352,11 @@ def test_error_handling():
         assert item[TextStreamingDecoder.DATA_KEY] == "valid content"
 
     finally:
+        # Ensure file handles are released before deleting on Windows
+        try:
+            node.shutdown()
+        except Exception:
+            pass
         if os.path.exists(valid_path):
             os.remove(valid_path)
         os.rmdir(temp_dir)
@@ -368,11 +402,11 @@ def test_text_stream_recursive_behavior():
         # Check that each line is only returned once
         # Reset the node
         new_source = MockSourceNode([file1_path, empty_file_path, error_file_path, file2_path])
-        node = TextStreamingDecoder(new_source)
+        new_node = TextStreamingDecoder(new_source)
 
         # Read lines again and check for duplicates
         seen_lines = set()
-        for item in node:
+        for item in new_node:
             line = item[TextStreamingDecoder.DATA_KEY]
             file_path = item[TextStreamingDecoder.METADATA_KEY]["file_path"]
             line_idx = item[TextStreamingDecoder.METADATA_KEY]["item_idx"]
@@ -386,6 +420,14 @@ def test_text_stream_recursive_behavior():
 
     finally:
         # Clean up
+        try:
+            node.shutdown()
+        except Exception:
+            pass
+        try:
+            new_node.shutdown()
+        except Exception:
+            pass
         for path in [file1_path, file2_path, empty_file_path]:
             if os.path.exists(path):
                 os.remove(path)
