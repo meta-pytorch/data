@@ -9,7 +9,7 @@ on:
 
 jobs:
   style:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Setup Python
@@ -29,7 +29,7 @@ jobs:
         run: git --no-pager diff
 
   mypy:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Get PyTorch Channel
@@ -75,7 +75,7 @@ jobs:
           fi
 
   complete_documentation:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Setup Python

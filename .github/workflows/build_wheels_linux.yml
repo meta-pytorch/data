@@ -34,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - repository: pytorch/data
+          - repository: meta-pytorch/data
             pre-script: packaging/pre_build_script_linux.sh
             post-script: ""
             smoke-test-script: test/smoke_test/smoke_test.py

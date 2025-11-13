@@ -15,7 +15,7 @@ on:
 
 jobs:
   test:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
