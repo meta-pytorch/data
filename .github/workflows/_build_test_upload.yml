@@ -45,10 +45,10 @@ jobs:
     needs: get_release_type
     runs-on: ubuntu-latest
     steps:
-      - name: Setup Python 3.9
+      - name: Setup Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: "3.13"
       - name: Checkout
         uses: actions/checkout@v4
         with:
