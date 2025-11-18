@@ -9,13 +9,13 @@ on:
 
 jobs:
   style:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.13"
       - name: Check out source repository
         uses: actions/checkout@v4
       - name: Install lint utilities
@@ -29,7 +29,7 @@ jobs:
         run: git --no-pager diff
 
   mypy:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Get PyTorch Channel
@@ -45,7 +45,7 @@ jobs:
       - name: Setup Python environment
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: "3.13"
       - name: Check out source repository
         uses: actions/checkout@v4
       - name: Install PyTorch
@@ -75,13 +75,13 @@ jobs:
           fi
 
   complete_documentation:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.13"
       - name: Check out source repository
         uses: actions/checkout@v4
       - name: Check if documentation is complete

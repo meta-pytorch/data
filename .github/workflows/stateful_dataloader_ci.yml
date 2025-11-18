@@ -15,7 +15,7 @@ on:
 
 jobs:
   test:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'meta-pytorch' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -25,7 +25,6 @@ jobs:
           - ubuntu-latest
           - windows-latest
         python-version:
-          - 3.9
           - "3.10"
           - "3.11"
           - "3.12"
