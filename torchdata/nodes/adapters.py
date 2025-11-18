@@ -123,12 +123,14 @@ class SamplerWrapper(BaseNode[T]):
         if initial_state is not None:
             self._num_yielded = initial_state[self.NUM_YIELDED_KEY]
             self.epoch = initial_state[self.EPOCH_KEY]
+            if hasattr(self.sampler, "set_epoch"):
+                # Always first set epoch, even if sampler is Stateful. Some Stateful
+                # samplers may have some specific handling to overwrite this.
+                self.sampler.set_epoch(self.epoch)
             if isinstance(self.sampler, Stateful):
                 self.sampler.load_state_dict(initial_state[self.SAMPLER_KEY])
                 self._it = iter(self.sampler)  # type: ignore [assignment]
             else:
-                if hasattr(self.sampler, "set_epoch"):
-                    self.sampler.set_epoch(self.epoch)
                 self._it = iter(self.sampler)
                 for i in range(self._num_yielded):
                     try:
