@@ -50,6 +50,6 @@ jobs:
       package_type: "wheel"
       os: ${{ inputs.os }}
       channel: ${{ inputs.channel }}
-      repository: "pytorch/data"
+      repository: "meta-pytorch/data"
       smoke_test: "source ./.github/scripts/validate_binaries.sh"
       install_torch: true

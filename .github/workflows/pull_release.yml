@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build_test_upload:
-    if: github.repository == 'pytorch/data'
+    if: github.repository == 'meta-pytorch/data'
     uses: ./.github/workflows/_build_test_upload.yml
     with:
       branch: ""

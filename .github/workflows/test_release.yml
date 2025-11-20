@@ -2,7 +2,7 @@ name: Push Test Release
 
 on:
   # [ Note: Manually Trigger the Workflow ]
-  # 1. Go to Actions under pytorch/data repo
+  # 1. Go to Actions under meta-pytorch/data repo
   # 2. In the left sidebar, click the workflow you want to run
   # 3. Above the list of workflow runs, select Run workflow
   # 4. Use the Branch dropdown to select the release/* branch
@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   build_test_upload:
-    if: github.repository == 'pytorch/data' && startsWith(github.ref_name, 'release/')
+    if: github.repository == 'meta-pytorch/data' && startsWith(github.ref_name, 'release/')
     uses: ./.github/workflows/_build_test_upload.yml
     with:
       branch: "release/0.11"
