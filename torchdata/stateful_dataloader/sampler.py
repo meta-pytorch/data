@@ -197,7 +197,6 @@ class StatefulDistributedSampler(torch.utils.data.distributed.DistributedSampler
         self.next_yielded = None
 
     def __iter__(self):
-        print(f"Calling __iter__... {self.yielded=} {self.next_yielded=}")
         self.yielded = 0
         if self.next_yielded is not None:
             self.yielded = self.next_yielded
