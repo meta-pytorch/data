@@ -96,10 +96,10 @@ class TestDataLoader(TestCase):
     def test_sampler_load_state_dict(self):
 
         sampler = StatefulDistributedSampler(self.dataset, num_replicas=10, rank=0)
-        sampler.load_state_dict({"yielded": 3})
+        sampler.load_state_dict({"epoch": 0, "yielded": 3})
         self.assertEqual(sampler.next_yielded, 3)
         with self.assertRaises(ValueError):
-            sampler.load_state_dict({"yielded": -1})
+            sampler.load_state_dict({"epoch": 0, "yielded": -1})
 
     def test_sampler_next_yielded(self):
 
@@ -108,7 +108,12 @@ class TestDataLoader(TestCase):
         next(iterator)  # advance the iterator
         self.assertEqual(sampler.yielded, 1)
         self.assertIsNone(sampler.next_yielded)
-        sampler.load_state_dict({StatefulDistributedSampler._YIELDED: 5})
+        sampler.load_state_dict(
+            {
+                StatefulDistributedSampler._EPOCH: 0,
+                StatefulDistributedSampler._YIELDED: 5,
+            }
+        )
         self.assertEqual(sampler.next_yielded, 5)
         iterator = iter(sampler)
         next(iterator)  # advance the iterator again

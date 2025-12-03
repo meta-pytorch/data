@@ -181,6 +181,7 @@ class BatchSampler(torch.utils.data.sampler.BatchSampler):
 
 class StatefulDistributedSampler(torch.utils.data.distributed.DistributedSampler):
     _YIELDED = "yielded"
+    _EPOCH = "epoch"
 
     def __init__(
         self,
@@ -206,9 +207,12 @@ class StatefulDistributedSampler(torch.utils.data.distributed.DistributedSampler
             yield idx
 
     def state_dict(self) -> Dict[str, Any]:
-        return {self._YIELDED: self.yielded}
+        return {self._YIELDED: self.yielded, self._EPOCH: self.epoch, "NEXT_YIELDED": self.next_yielded}
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        if self._EPOCH not in state_dict:
+            raise ValueError("Invalid state_dict")
+        self.set_epoch(state_dict[self._EPOCH])
         if self._YIELDED not in state_dict:
             raise ValueError("Invalid state_dict")
         if state_dict[self._YIELDED] < 0:
