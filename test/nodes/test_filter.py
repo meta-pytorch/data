@@ -44,7 +44,7 @@ class TestFilter(TestCase):
         node = Filter(source, lambda x: x["step"] % 3 == 0)  # Keep items where step is divisible by 3
 
         # Test multi epoch
-        for epoch in range(2):
+        for _ in range(2):
             node.reset()
             results = list(node)
             expected_steps = [i for i in range(num_samples) if i % 3 == 0]
