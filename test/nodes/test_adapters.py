@@ -19,7 +19,7 @@ class TestIterableWrapper(TestCase):
     def test_iterable(self):
         n = 20
         node = IterableWrapper(range(n))
-        for epoch in range(2):
+        for _ in range(2):
             node.reset()
             result = list(node)
             self.assertEqual(len(result), n)
@@ -41,7 +41,7 @@ class TestIterableWrapper(TestCase):
     def test_iterable_dataset(self):
         n = 20
         node = IterableWrapper(DummyIterableDataset(n, name="test"))
-        for epoch in range(2):
+        for _ in range(2):
             node.reset()
             result = list(node)
             self.assertEqual(len(result), n)
@@ -63,7 +63,7 @@ class TestMapStyle(TestCase):
     def test_default_sampler(self):
         n = 20
         node = MapStyleWrapper(DummyMapDataset(n), sampler=range(n))
-        for epoch in range(2):
+        for _ in range(2):
             node.reset()
             result = list(node)
             self.assertEqual(len(result), n)
@@ -77,7 +77,7 @@ class TestMapStyle(TestCase):
         ds = DummyMapDataset(n)
         node = MapStyleWrapper(ds, sampler=RandomSampler(ds))
         results = []
-        for epoch in range(2):
+        for _ in range(2):
             node.reset()
             result = list(node)
             results.append(result)
@@ -97,7 +97,7 @@ class TestMapStyle(TestCase):
         d = {f"i{i}": orig_ds[i] for i in range(n)}
         sampler = list(d.keys())
         node = MapStyleWrapper(d, sampler=sampler)
-        for epoch in range(2):
+        for _ in range(2):
             node.reset()
             result = list(node)
             self.assertEqual(len(result), n)

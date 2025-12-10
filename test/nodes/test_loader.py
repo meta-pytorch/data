@@ -32,7 +32,7 @@ class TestLoader(TestCase):
 
         self.assertEqual(x.state_dict(), state_dict_0)
 
-        for i in range(length // 2):
+        for _ in range(length // 2):
             results_copy.append(next(it))
 
         self.assertEqual(len(results), length)
