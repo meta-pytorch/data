@@ -1485,7 +1485,7 @@ class TestMultiEpochSDL_shard0(TestCase):
         new_dataloader1.load_state_dict(state_dict)
         # Run through the new dataloader for another 2 epochs and count the number of items yielded
         additional_num_items_yielded = 0
-        for i in range(2):
+        for _ in range(2):
             epoch_num_items_yielded = 0
             for batch in new_dataloader1:
                 dataloader1_items.append(batch)
@@ -1528,7 +1528,7 @@ class TestEndOfEpochBehavior_shard0(TestCase):
 
     def _count_items_yielded(self, data_loader: StatefulDataLoader) -> int:
         num_items_yielded = 0
-        for batch in data_loader:
+        for _ in data_loader:
             num_items_yielded += 1
         return num_items_yielded
 
@@ -1542,7 +1542,7 @@ class TestEndOfEpochBehavior_shard0(TestCase):
         # Run through the dataloader for 1 epoch and count the number of items yielded
         num_items_yielded = 0
 
-        for batch in dataloader:
+        for _ in dataloader:
             num_items_yielded += 1
             sd_in = dataloader.state_dict()
         sd_out = dataloader.state_dict()
@@ -1902,7 +1902,7 @@ class TestOutOfOrderWithCheckpointing(TestCase):
 
         new_dataloader = StatefulDataLoader(dataset, num_workers=2, in_order=False)
         new_dataloader.load_state_dict(state_dict)
-        for i, data in enumerate(new_dataloader):
+        for data in new_dataloader:
             output.append(data)
 
         self.assertEqual(len(output), 10)
@@ -1933,7 +1933,7 @@ class TestOutOfOrderWithCheckpointing(TestCase):
 
         new_dataloader = StatefulDataLoader(dataset, batch_size=1, num_workers=2, in_order=False)
         new_dataloader.load_state_dict(state_dict)
-        for i, data in enumerate(new_dataloader):
+        for data in new_dataloader:
             output.append(data)
 
         self.assertEqual(len(output), 10)
@@ -1964,7 +1964,7 @@ class TestOutOfOrderWithCheckpointing(TestCase):
 
         new_dataloader = StatefulDataLoader(dataset, batch_size=1, num_workers=2, in_order=False)
         new_dataloader.load_state_dict(state_dict)
-        for i, data in enumerate(new_dataloader):
+        for data in new_dataloader:
             output.append(data)
 
         self.assertEqual(len(output), 10)
