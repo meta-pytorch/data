@@ -54,7 +54,7 @@ class TestDataLoader(TestCase):
             seed=42,
             drop_last=False,
         )
-        self.assertEqual(sampler.dataset, self.dataset)
+        self.assertEqual(sampler.dataset_size, len(self.dataset))
         self.assertEqual(sampler.num_replicas, 10)
         self.assertEqual(sampler.rank, 0)
         self.assertFalse(sampler.shuffle)
@@ -236,6 +236,76 @@ class TestDataLoader(TestCase):
 
         self.assertEqual(results1, results2, "Data should be replicable with same seed")
         self.assertNotEqual(results1, results3, "Data should not be replicable with different seed")
+
+    def test_StatefulDistributedSampler_initialization_with_dataset_size(self):
+        sampler = StatefulDistributedSampler(dataset_size=100, num_replicas=2, rank=0, shuffle=False)
+        self.assertEqual(sampler.dataset_size, 100)
+        indices = list(iter(sampler))
+        expected_indices = list(range(0, 100, 2))
+        self.assertEqual(indices, expected_indices)
+
+    def test_StatefulDistributedSampler_mismatched_dataset_and_dataset_size(self):
+        dataset = MockDataset(100)
+        with self.assertRaises(ValueError):
+            StatefulDistributedSampler(dataset=dataset, dataset_size=50)
+
+    def test_StatefulDistributedSampler_no_dataset_or_dataset_size(self):
+        with self.assertRaises(ValueError):
+            StatefulDistributedSampler()
+
+    def test_StatefulDistributedSampler_drop_last_with_dataset_size(self):
+        dataset_size = 100
+        num_replicas = 3
+        sampler = StatefulDistributedSampler(
+            dataset_size=dataset_size,
+            num_replicas=num_replicas,
+            rank=0,
+            drop_last=True,
+            shuffle=False,
+        )
+        self.assertEqual(sampler.num_samples, 33)
+        indices = list(iter(sampler))
+        self.assertEqual(len(indices), 33)
+        expected_indices = list(range(0, 99, num_replicas))
+        self.assertEqual(indices, expected_indices)
+
+    def test_StatefulDistributedSampler_dataloader_state_dict_with_dataset_size(self):
+        dataset_size = 100
+        sampler = StatefulDistributedSampler(dataset_size=dataset_size, num_replicas=1, rank=0, shuffle=False)
+        dataset = MockDataset(dataset_size)
+        dataloader = StatefulDataLoader(dataset, batch_size=10, sampler=sampler)
+        iter_count = 5
+        for i, _ in enumerate(dataloader):
+            if i == iter_count - 1:
+                break
+        state_dict = dataloader.state_dict()
+        new_sampler = StatefulDistributedSampler(dataset_size=dataset_size, num_replicas=1, rank=0, shuffle=False)
+        new_dataloader = StatefulDataLoader(MockDataset(dataset_size), batch_size=10, sampler=new_sampler)
+        new_dataloader.load_state_dict(state_dict)
+        resumed_data = []
+        for data in new_dataloader:
+            resumed_data.append(data.tolist())
+        expected_data = []
+        full_dataloader = StatefulDataLoader(MockDataset(dataset_size), batch_size=10, sampler=sampler)
+        for data in full_dataloader:
+            expected_data.append(data.tolist())
+        self.assertEqual(resumed_data, expected_data[iter_count:])
+
+    def test_StatefulDistributedSampler_dataset_size_zero(self):
+        sampler = StatefulDistributedSampler(dataset_size=0, num_replicas=1, rank=0)
+        self.assertEqual(len(sampler), 0)
+        indices = list(iter(sampler))
+        self.assertEqual(len(indices), 0)
+
+    def test_StatefulDistributedSampler_shuffle_with_dataset_size(self):
+        dataset_size = 100
+        sampler = StatefulDistributedSampler(dataset_size=dataset_size, num_replicas=1, rank=0, shuffle=True, seed=42)
+        indices = list(iter(sampler))
+        self.assertEqual(len(indices), dataset_size)
+        self.assertEqual(sorted(indices), list(range(dataset_size)))
+        sampler.set_epoch(1)
+        indices_epoch_1 = list(iter(sampler))
+        self.assertNotEqual(indices, indices_epoch_1)
 
 
 if __name__ == "__main__":
