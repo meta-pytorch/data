@@ -425,6 +425,46 @@ class StatefulDataLoader(DataLoader[_T_co]):
             return
         self.next_iter_state = state_dict
 
+    def enumerate(self, start: int = 0):
+        """
+        Return an enumerate object that yields (index, data) pairs where the index
+        reflects the actual position in the dataset, accounting for any previously
+        loaded state.
+
+        This is useful when resuming from a checkpoint, as the standard enumerate()
+        function always starts from 0, while this method starts from the correct
+        position based on the dataloader's internal state.
+
+        Args:
+            start (int): Value to start the enumeration from. This is added to the
+                        internal batch position. Default is 0.
+
+        Returns:
+            An iterator yielding (index, data) tuples where index is the actual
+            batch position in the dataset.
+
+        Example:
+            >>> dataloader = StatefulDataLoader(dataset, batch_size=2)
+            >>> # Process some batches
+            >>> for i, batch in enumerate(dataloader):
+            >>>     if i == 2:
+            >>>         state = dataloader.state_dict()
+            >>>         break
+            >>>
+            >>> # Create new dataloader and restore state
+            >>> dataloader2 = StatefulDataLoader(dataset, batch_size=2)
+            >>> dataloader2.load_state_dict(state)
+            >>>
+            >>> # Use custom enumerate method to get correct indices
+            >>> for i, batch in dataloader2.enumerate():
+            >>>     print(f"Batch {i}: {batch}")  # Will print "Batch 3: ..."
+        """
+
+        for data in self:
+            current_batch = getattr(self._iterator, "_num_yielded", 1) - 1
+            yield current_batch + start, data
+            current_batch += 1
+
 
 class _StatefulBaseDataLoaderIter(_BaseDataLoaderIter):
     def __init__(self, loader: StatefulDataLoader) -> None:
