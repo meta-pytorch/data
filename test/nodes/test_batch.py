@@ -9,8 +9,8 @@ import itertools
 import torch
 from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase
-from torchdata.nodes.batch import Batcher, Unbatcher
 from torchdata.nodes import IterableWrapper
+from torchdata.nodes.batch import Batcher, Unbatcher
 
 from .utils import MockSource, run_test_save_load_state
 
