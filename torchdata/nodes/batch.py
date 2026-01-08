@@ -25,6 +25,8 @@ class Batcher(BaseNode[List[T]]):
 
     def __init__(self, source: BaseNode[T], batch_size: int, drop_last: bool = True):
         super().__init__()
+        if batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer")
         self.source = source
         self.batch_size = batch_size
         self.drop_last = drop_last
