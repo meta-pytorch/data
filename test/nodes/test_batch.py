@@ -9,6 +9,7 @@ import itertools
 import torch
 from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase
+from torchdata.nodes import IterableWrapper
 from torchdata.nodes.batch import Batcher, Unbatcher
 
 from .utils import MockSource, run_test_save_load_state
@@ -27,6 +28,11 @@ class TestBatcher(TestCase):
                 self.assertEqual(results[i][j]["step"], i * batch_size + j)
                 self.assertEqual(results[i][j]["test_tensor"], torch.tensor([i * batch_size + j]))
                 self.assertEqual(results[i][j]["test_str"], f"str_{i * batch_size + j}")
+
+    def test_batcher_batch_size_zero_raises(self):
+        source = IterableWrapper(range(10))
+        with self.assertRaises(ValueError):
+            Batcher(source, batch_size=0)
 
     def test_batcher_drop_last_false(self) -> None:
         batch_size = 6
