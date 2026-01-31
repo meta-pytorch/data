@@ -26,6 +26,7 @@ from torch.utils.data._utils.worker import (
     _ResumeIteration,
     ManagerWatchdog,
     WorkerInfo,
+    _RNG,
 )
 
 from .incremental_state import (
@@ -99,12 +100,25 @@ def _worker_loop(
         torch.set_num_threads(1)
         seed = base_seed + worker_id
         random.seed(seed)
-        torch.manual_seed(seed)
+        torch_generator = torch.manual_seed(seed)
+
+        # Extract the global generators
+        random_generator = random._inst
+        numpy_generator = None
+
+
         if HAS_NUMPY:
             np_seed = _generate_state(base_seed, worker_id)
             import numpy as np
 
             np.random.seed(np_seed)
+            numpy_generator = np.random.mtrand._rand
+
+        rng = _RNG(
+            random_generator=random_generator,
+            torch_generator=torch_generator,
+            numpy_generator=numpy_generator,
+        )
 
         from torch.utils.data import IterDataPipe
         from torch.utils.data.graph_settings import apply_random_seed
@@ -116,7 +130,7 @@ def _worker_loop(
             dataset = apply_random_seed(dataset, shared_rng)
 
         torch.utils.data._utils.worker._worker_info = WorkerInfo(
-            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset
+            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset, rng=rng
         )
 
         from torch.utils.data import _DatasetKind
