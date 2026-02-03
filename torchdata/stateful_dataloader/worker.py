@@ -116,7 +116,7 @@ def _worker_loop(
             dataset = apply_random_seed(dataset, shared_rng)
 
         torch.utils.data._utils.worker._worker_info = WorkerInfo(
-            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset
+            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset, rng=shared_rng
         )
 
         from torch.utils.data import _DatasetKind
