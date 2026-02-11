@@ -2846,9 +2846,15 @@ class SimpleCustomBatch:
 # Workaround for https://github.com/pytorch/pytorch/issues/50661
 # Classes from  `__main__` can not be correctly unpickled from spawned module
 # See https://docs.python.org/3/library/multiprocessing.html#multiprocessing-programming
-
-
-self_module = __import__(os.path.splitext(os.path.basename(__file__))[0])
+#
+# When not running as __main__, use __name__ to get the full module path (e.g.,
+# "stateful_dataloader.test_dataloader") which is required for Meta internal testing.
+# The basename fallback is preserved for OSS pytest compatibility where the test
+# directory is added to sys.path and "test_dataloader" works as a top-level import.
+if __name__ != "__main__":
+    self_module = __import__(__name__, fromlist=[""])
+else:
+    self_module = __import__(os.path.splitext(os.path.basename(__file__))[0])
 
 
 def collate_wrapper(batch):
