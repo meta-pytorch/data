@@ -397,7 +397,10 @@ class _ParallelMapperImpl(BaseNode[T]):
             self._it._shutdown(cancel_futures=True)
 
     def __del__(self):
-        self.shutdown()
+        try:
+            self.shutdown()
+        except Exception:
+            pass
 
 
 class ParallelMapper(BaseNode[T]):
