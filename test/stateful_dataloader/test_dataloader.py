@@ -2433,12 +2433,15 @@ except RuntimeError as e:
         self.assertEqual(dataloader.default_collate([t_in]).is_shared(), False)
         self.assertEqual(dataloader.default_collate([n_in]).is_shared(), False)
 
-        # FIXME: fix the following hack that makes `default_collate` believe
-        #        that it is in a worker process (since it tests
-        #        `get_worker_info() != None`), even though it is not.
         old = _utils.worker._worker_info
         try:
-            _utils.worker._worker_info = "x"
+            _utils.worker._worker_info = _utils.worker.WorkerInfo(
+                id=0,
+                num_workers=1,
+                seed=0,
+                dataset=self.dataset,
+                worker_method="multiprocessing",
+            )
             self.assertEqual(dataloader.default_collate([t_in]).is_shared(), True)
             self.assertEqual(dataloader.default_collate([n_in]).is_shared(), True)
         finally:
