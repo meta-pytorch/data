@@ -53,3 +53,4 @@ jobs:
       repository: "meta-pytorch/data"
       smoke_test: "source ./.github/scripts/validate_binaries.sh"
       install_torch: true
+      with_rocm: disable
