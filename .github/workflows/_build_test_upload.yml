@@ -40,8 +40,9 @@ jobs:
           echo "type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
         id: get_release_type
 
+  # TODO: enable docs build after migration to sphinx 2
   build_docs:
-    if: always() && inputs.branch != ''
+    if: false
     needs: get_release_type
     runs-on: ubuntu-latest
     steps:
