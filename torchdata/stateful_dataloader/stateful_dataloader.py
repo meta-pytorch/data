@@ -376,8 +376,6 @@ class StatefulDataLoader(DataLoader[_T_co]):
         # iterator on the next __iter__ call, and this flag is used for those cases.
         self._initial_iter_for_state_dict = False
 
-        torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
-
     def _get_iterator(self) -> "_StatefulBaseDataLoaderIter":
         it: _StatefulBaseDataLoaderIter
         if self.num_workers == 0:
