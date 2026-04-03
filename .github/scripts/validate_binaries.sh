@@ -10,6 +10,9 @@ AWS_ENABLED=1
 # shellcheck disable=SC2086
 pip install ${PYTORCH_PIP_PREFIX:-} torchdata --extra-index-url "${PYTORCH_PIP_DOWNLOAD_URL}"
 
+# Fixes https://github.com/meta-pytorch/data/issues/1539
+pip install packaging
+
 
 case "${AWS_ENABLED}" in
     "0")
