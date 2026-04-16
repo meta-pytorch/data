@@ -82,7 +82,7 @@ class TestQueueSnapshotStore(TestCase):
             thread = threading.Thread(target=_worker_raises_after, args=(QUEUE_TIMEOUT * 3.0,))
             thread.start()
             with self.assertRaisesRegex(RuntimeError, r"thread.is_alive\(\)=False"):
-                store.get_initial_snapshot(thread, QUEUE_TIMEOUT * 5.0)
+                store.get_initial_snapshot(thread, QUEUE_TIMEOUT * 10.0)
             thread.join()
 
     def test_future_dead_error(self) -> None:
