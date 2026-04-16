@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import torch
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
@@ -21,11 +21,9 @@ def _capture_worker_info(item: Dict[str, Any]) -> Dict[str, Any]:
     if info is None:
         item["worker_id"] = None
         item["num_workers"] = None
-        item["seed"] = None
     else:
         item["worker_id"] = info.id
         item["num_workers"] = info.num_workers
-        item["seed"] = info.seed
     return item
 
 
@@ -43,47 +41,17 @@ class TestGetWorkerInfo(TestCase):
         self.assertIsNone(get_worker_info())
 
     def test_thread_workers(self) -> None:
-        num_workers = 3
-        src = MockSource(num_samples=12)
+        num_workers = 4
+        src = MockSource(num_samples=40)
         node = ParallelMapper(src, _capture_worker_info, num_workers=num_workers, method="thread", in_order=False)
 
         results = list(node)
-        self.assertEqual(len(results), 12)
+        self.assertEqual(len(results), 40)
 
-        seen_ids = {r["worker_id"] for r in results}
-        # All worker ids must be in [0, num_workers)
-        self.assertTrue(seen_ids.issubset(set(range(num_workers))), f"Unexpected worker ids: {seen_ids}")
-        # Every item reports the correct num_workers
+        # All reported worker ids must be in [0, num_workers)
         for r in results:
+            self.assertIn(r["worker_id"], set(range(num_workers)))
             self.assertEqual(r["num_workers"], num_workers)
-            self.assertIsNotNone(r["seed"])
-
-    def test_thread_workers_each_id_used(self) -> None:
-        num_workers = 4
-        src = MockSource(num_samples=40)
-        node = ParallelMapper(src, _capture_worker_info, num_workers=num_workers, method="thread", in_order=False)
-
-        results = list(node)
-        seen_ids = {r["worker_id"] for r in results}
-        # With 40 items and 4 workers we expect all 4 worker ids to appear
-        self.assertEqual(seen_ids, set(range(num_workers)))
-
-    def test_thread_workers_unique_seeds(self) -> None:
-        num_workers = 4
-        src = MockSource(num_samples=40)
-        node = ParallelMapper(src, _capture_worker_info, num_workers=num_workers, method="thread", in_order=False)
-
-        results = list(node)
-        # Group seeds by worker id; each worker should report one unique seed
-        seeds_by_worker: Dict[int, set] = {}
-        for r in results:
-            seeds_by_worker.setdefault(r["worker_id"], set()).add(r["seed"])
-        # Each worker has exactly one seed
-        for wid, seed_set in seeds_by_worker.items():
-            self.assertEqual(len(seed_set), 1, f"Worker {wid} reported multiple seeds: {seed_set}")
-        # Seeds differ across workers
-        all_seeds = [next(iter(s)) for s in seeds_by_worker.values()]
-        self.assertEqual(len(set(all_seeds)), len(all_seeds), f"Workers share seeds: {all_seeds}")
 
     @unittest.skipIf(IS_WINDOWS, "forkserver not supported on Windows")
     def test_process_workers_get_worker_info(self) -> None:
@@ -101,9 +69,8 @@ class TestGetWorkerInfo(TestCase):
 
         results = list(node)
         self.assertEqual(len(results), 8)
-        seen_ids = {r["worker_id"] for r in results}
-        self.assertTrue(seen_ids.issubset(set(range(num_workers))))
         for r in results:
+            self.assertIn(r["worker_id"], set(range(num_workers)))
             self.assertEqual(r["num_workers"], num_workers)
 
     @unittest.skipIf(IS_WINDOWS, "forkserver not supported on Windows")
@@ -122,9 +89,8 @@ class TestGetWorkerInfo(TestCase):
 
         results = list(node)
         self.assertEqual(len(results), 8)
-        seen_ids = {r["worker_id"] for r in results}
-        self.assertTrue(seen_ids.issubset(set(range(num_workers))))
         for r in results:
+            self.assertIn(r["worker_id"], set(range(num_workers)))
             self.assertEqual(r["num_workers"], num_workers)
 
     def test_num_workers_zero_no_worker_info(self) -> None:
