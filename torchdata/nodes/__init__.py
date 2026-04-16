@@ -20,13 +20,11 @@ from .samplers.stop_criteria import StopCriteria
 from .shuffler import Shuffler
 from .types import Stateful
 
-
 __all__ = [
     "BaseNode",
     "Batcher",
     "Cycler",
     "Filter",
-    "get_worker_info",
     "Header",
     "IterableWrapper",
     "Loader",
@@ -42,6 +40,7 @@ __all__ = [
     "StopCriteria",
     "T",
     "Unbatcher",
+    "get_worker_info",
 ]
 
 assert sorted(__all__) == __all__

@@ -17,7 +17,6 @@ from torch.utils.data import WorkerInfo
 
 from .constants import QUEUE_TIMEOUT
 
-
 _thread_local = threading.local()
 
 
