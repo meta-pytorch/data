@@ -39,5 +39,5 @@ class Compose:
         return x
 
     def __repr__(self) -> str:
-        fns_str = ",\n    ".join(repr(fn) for fn in self.fns)
-        return f"Compose([\n    {fns_str}\n])"
+        fns_str = ", ".join(repr(fn) for fn in self.fns)
+        return f"Compose([{fns_str}])"
