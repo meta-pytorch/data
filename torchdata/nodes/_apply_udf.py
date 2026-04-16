@@ -11,9 +11,9 @@ from typing import Callable, Optional, Union
 
 import torch
 import torch.multiprocessing as mp
-import torch.utils.data._utils.worker as _worker_module
-
+import torch.utils.data._utils.worker as _worker_module  # type: ignore[import]
 from torch._utils import ExceptionWrapper
+from torch.utils.data import WorkerInfo
 
 from .constants import QUEUE_TIMEOUT
 
@@ -21,7 +21,7 @@ from .constants import QUEUE_TIMEOUT
 _thread_local = threading.local()
 
 
-def get_worker_info() -> Optional[object]:
+def get_worker_info() -> Optional[WorkerInfo]:
     """Return a :class:`~torch.utils.data.WorkerInfo` for the current
     :class:`~torchdata.nodes.ParallelMapper` worker, or ``None`` if called
     from outside a worker context.
@@ -66,13 +66,13 @@ def _apply_udf(
     """
     torch.set_num_threads(1)
     seed = torch.initial_seed() + worker_id
-    worker_info = _worker_module.WorkerInfo(id=worker_id, num_workers=num_workers, seed=seed, dataset=None)
+    worker_info = WorkerInfo(id=worker_id, num_workers=num_workers, seed=seed, dataset=None)  # type: ignore[arg-type]
     # Thread-local: always returns the correct info for this worker, regardless of
     # whether other workers (threads) have set their own worker info concurrently.
     _thread_local.worker_info = worker_info
     # Module-level global: correct for process workers (isolated memory); for thread
     # workers this may race, so callers should use torchdata.nodes.get_worker_info().
-    _worker_module._worker_info = worker_info
+    _worker_module._worker_info = worker_info  # type: ignore[attr-defined]
 
     while True:
         if stop_event.is_set() and in_q.empty():
