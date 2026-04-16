@@ -4,7 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
+
+from torch.utils.data import default_collate
 
 from torchdata.nodes.base_node import BaseNode, T
 
@@ -58,6 +60,33 @@ class Batcher(BaseNode[List[T]]):
 
     def get_state(self) -> Dict[str, Any]:
         return {self.SOURCE_KEY: self.source.state_dict()}
+
+
+class Collator(Batcher[T]):
+    """Convenience node that batches items and applies a collate function to each batch.
+    Wraps :class:`Batcher` and applies ``collate_fn`` (default: ``torch.utils.data.default_collate``).
+
+    Args:
+        source (BaseNode[T]): The source node to batch the data from.
+        batch_size (int): The size of the batch.
+        drop_last (bool): Whether to drop the last batch if it is smaller than batch_size. Default is True.
+        collate_fn (Callable, optional): Function to collate a list of samples into a batch.
+            Defaults to ``torch.utils.data.default_collate``.
+    """
+
+    def __init__(
+        self,
+        source: BaseNode[T],
+        batch_size: int,
+        drop_last: bool = True,
+        collate_fn: Optional[Callable[[List[T]], Any]] = None,
+    ):
+        super().__init__(source, batch_size, drop_last)
+        self.collate_fn = collate_fn if collate_fn is not None else default_collate
+
+    def next(self) -> Any:
+        batch = super().next()
+        return self.collate_fn(batch)
 
 
 class Unbatcher(BaseNode[T]):
