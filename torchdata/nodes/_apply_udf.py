@@ -49,7 +49,7 @@ def _apply_udf(
     out_q: Union[queue.Queue, mp.Queue],
     udf: Callable,
     stop_event: Union[threading.Event, python_mp_synchronize.Event],
-    num_workers: int,
+    num_workers: int = 1,
 ):
     """_apply_udf assumes in_q emits tuples of (x, idx) where x is the
     payload, idx is the index of the result, potentially used for maintaining
