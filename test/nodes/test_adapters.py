@@ -119,6 +119,35 @@ class TestMapStyle(TestCase):
         run_test_save_load_state(self, node, midpoint)
 
 
+class TestMapStyleParallelMapper(TestCase):
+    @parameterized.expand([1, 4])
+    def test_parallel_workers(self, num_workers: int):
+        n = 20
+        node = MapStyleWrapper(DummyMapDataset(n), sampler=range(n), num_workers=num_workers)
+        for _ in range(2):
+            node.reset()
+            result = list(node)
+            self.assertEqual(len(result), n)
+            self.assertEqual({row["step"] for row in result}, set(range(n)))
+
+    @parameterized.expand([1, 4])
+    def test_parallel_workers_in_order(self, num_workers: int):
+        n = 20
+        node = MapStyleWrapper(DummyMapDataset(n), sampler=range(n), num_workers=num_workers, in_order=True)
+        for _ in range(2):
+            node.reset()
+            result = list(node)
+            self.assertEqual(len(result), n)
+            for i, row in enumerate(result):
+                self.assertEqual(row["step"], i)
+
+    @parameterized.expand([0, 7])
+    def test_save_load_state_parallel(self, midpoint: int):
+        n = 20
+        node = MapStyleWrapper(DummyMapDataset(n), sampler=range(n), num_workers=2)
+        run_test_save_load_state(self, node, midpoint)
+
+
 class TestSamplerWrapper(TestCase):
     def test_sampler_wrapper(self):
         n = 20
