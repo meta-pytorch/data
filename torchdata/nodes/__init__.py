@@ -6,7 +6,7 @@
 
 from .adapters import IterableWrapper, MapStyleWrapper, SamplerWrapper
 from .base_node import BaseNode, T
-from .batch import Batcher, Unbatcher
+from .batch import Batcher, Collator, Unbatcher
 from .cycler import Cycler
 from .filter import Filter
 from .header import Header
@@ -23,6 +23,7 @@ from .types import Stateful
 __all__ = [
     "BaseNode",
     "Batcher",
+    "Collator",
     "Cycler",
     "Filter",
     "Header",
