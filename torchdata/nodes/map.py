@@ -162,6 +162,7 @@ class _ParallelMapperIter(Iterator[T]):
         self._sem = threading.BoundedSemaphore(value=self._max_tasks)
 
         self._done = False
+        self._pool_shutdown = False
 
         self._stop = threading.Event()
         self._mp_stop = mp_context.Event()
@@ -296,7 +297,8 @@ class _ParallelMapperIter(Iterator[T]):
     def _shutdown(self, cancel_futures=False):
         self._stop.set()
         self._mp_stop.set()
-        if hasattr(self, "pool"):
+        if hasattr(self, "pool") and not self._pool_shutdown:
+            self._pool_shutdown = True
             if cancel_futures:
                 # Wait for all threads to finish before returning, but cancel any
                 # futures that are pending. This is used when calling _shutdown()

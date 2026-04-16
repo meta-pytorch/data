@@ -17,6 +17,7 @@ from .prefetch import Prefetcher
 from .samplers.multi_node_weighted_sampler import MultiNodeWeightedSampler
 from .samplers.stop_criteria import StopCriteria
 from .shuffler import Shuffler
+from .transforms import Compose
 from .types import Stateful
 
 
@@ -24,6 +25,7 @@ __all__ = [
     "BaseNode",
     "Batcher",
     "Collator",
+    "Compose",
     "Cycler",
     "Filter",
     "Header",
