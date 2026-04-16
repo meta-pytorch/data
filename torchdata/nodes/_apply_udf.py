@@ -64,9 +64,7 @@ def _apply_udf(
     """
     torch.set_num_threads(1)
     seed = torch.initial_seed() + worker_id
-    worker_info = _worker_module.WorkerInfo(  # type: ignore[attr-defined,arg-type]
-        id=worker_id, num_workers=num_workers, seed=seed, dataset=None
-    )
+    worker_info = _worker_module.WorkerInfo(id=worker_id, num_workers=num_workers, seed=seed, dataset=None)  # type: ignore[attr-defined,arg-type]
     # Thread-local: always returns the correct info for this worker, regardless of
     # whether other workers (threads) have set their own worker info concurrently.
     _thread_local.worker_info = worker_info
