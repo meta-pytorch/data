@@ -7,20 +7,19 @@
 import multiprocessing.synchronize as python_mp_synchronize
 import queue
 import threading
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.multiprocessing as mp
 import torch.utils.data._utils.worker as _worker_module  # type: ignore[import]
 from torch._utils import ExceptionWrapper
-from torch.utils.data import WorkerInfo
 
 from .constants import QUEUE_TIMEOUT
 
 _thread_local = threading.local()
 
 
-def get_worker_info() -> Optional[WorkerInfo]:
+def get_worker_info() -> Optional[Any]:
     """Return a :class:`~torch.utils.data.WorkerInfo` for the current
     :class:`~torchdata.nodes.ParallelMapper` worker, or ``None`` if called
     from outside a worker context.
@@ -65,7 +64,9 @@ def _apply_udf(
     """
     torch.set_num_threads(1)
     seed = torch.initial_seed() + worker_id
-    worker_info = WorkerInfo(id=worker_id, num_workers=num_workers, seed=seed, dataset=None)  # type: ignore[arg-type]
+    worker_info = _worker_module.WorkerInfo(  # type: ignore[attr-defined]
+        id=worker_id, num_workers=num_workers, seed=seed, dataset=None
+    )
     # Thread-local: always returns the correct info for this worker, regardless of
     # whether other workers (threads) have set their own worker info concurrently.
     _thread_local.worker_info = worker_info
