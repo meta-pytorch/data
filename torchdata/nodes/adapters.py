@@ -11,7 +11,7 @@ from torch.utils.data import Sampler
 
 from torchdata.nodes.base_node import BaseNode, T
 
-from .map import Mapper
+from .map import ParallelMapper
 
 from .types import Stateful
 
@@ -75,16 +75,20 @@ class IterableWrapper(BaseNode[T]):
         return state_dict
 
 
-def MapStyleWrapper(map_dataset: Mapping[K, T], sampler: Sampler[K]) -> BaseNode[T]:
-    """Thin Wrapper that converts any MapDataset in to a torchdata.node
-    If you want parallelism, copy this and replace Mapper with ParallelMapper.
+def MapStyleWrapper(map_dataset: Mapping[K, T], sampler: Sampler[K], **parallel_mapper_kwargs) -> BaseNode[T]:
+    """Thin Wrapper that converts any MapDataset in to a torchdata.node.
 
     Args:
-        map_dataset (Mapping[K, T]): - Apply map_dataset.__getitem__ to the outputs of sampler.
-        sampler (Sampler[K]):
+        map_dataset (Mapping[K, T]): Apply map_dataset.__getitem__ to the outputs of sampler.
+        sampler (Sampler[K]): Sampler to generate indices for map_dataset.
+        **parallel_mapper_kwargs: Optional kwargs forwarded to :class:`ParallelMapper`.
+            Supported kwargs include ``num_workers`` (default 0), ``in_order``,
+            ``method``, ``multiprocessing_context``, ``max_concurrent``,
+            ``snapshot_frequency``, and ``prebatch``.
     """
+    parallel_mapper_kwargs.setdefault("num_workers", 0)
     sampler_node: SamplerWrapper[K] = SamplerWrapper(sampler)
-    mapper_node = Mapper(sampler_node, map_dataset.__getitem__)
+    mapper_node = ParallelMapper(sampler_node, map_dataset.__getitem__, **parallel_mapper_kwargs)
     return mapper_node
 
 
