@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from ._apply_udf import get_worker_info
+from ._worker_info import get_worker_info
 from .adapters import IterableWrapper, MapStyleWrapper, SamplerWrapper
 from .base_node import BaseNode, T
 from .batch import Batcher, Unbatcher
