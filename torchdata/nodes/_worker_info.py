@@ -45,9 +45,7 @@ def _set_worker_info(worker_id: int, num_workers: int) -> None:
     maps over arbitrary items rather than a PyTorch Dataset object.
     """
     seed = torch.initial_seed() + worker_id
-    worker_info = _worker_module.WorkerInfo(  # type: ignore[attr-defined,arg-type]
-        id=worker_id, num_workers=num_workers, seed=seed, dataset=None
-    )
+    worker_info = _worker_module.WorkerInfo(id=worker_id, num_workers=num_workers, seed=seed, dataset=None)  # type: ignore[attr-defined,arg-type]
     # Thread-local storage: always returns the correct info for this worker
     # even when multiple thread-workers run concurrently in the same process.
     _thread_local.worker_info = worker_info
