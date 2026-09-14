@@ -11,6 +11,10 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  schedule:
+    # 11:30 UTC, the time pytorch/test-infra's trigger_nightly.yml used to cut
+    # our nightly branch for us.
+    - cron: 30 11 * * *
   workflow_dispatch:
 
 permissions:
@@ -18,7 +22,43 @@ permissions:
   contents: read
 
 jobs:
+  # Cut the nightly branch ourselves. This is the same commit-tree/force-push
+  # that pytorch/test-infra's .github/actions/trigger-nightly does, moved into
+  # this repo: it ran there as pytorchbot, and pytorchbot lost write access to
+  # the meta-pytorch org on 2026-09-10. Our nightly branch has not moved since
+  # 2026-09-09T11:37:02Z. GITHUB_TOKEN needs no cross-org grant.
+  #
+  # NOTE: a push made with GITHUB_TOKEN does not start a new workflow run, so
+  # the `push: branches: [nightly]` trigger above will not fire for this. That
+  # is why the build below runs in this same run, off the commit we just cut,
+  # rather than waiting to be triggered by the push.
+  cut-nightly:
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+      - name: Create nightly commit
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git fetch origin nightly
+          HEAD_COMMIT_HASH=$(git rev-parse HEAD)
+          NIGHTLY_DATE=$(date +"%Y-%m-%d")
+          NIGHTLY_RELEASE_COMMIT=$(git commit-tree -p FETCH_HEAD "HEAD^{tree}" \
+            -m "${NIGHTLY_DATE} nightly release (${HEAD_COMMIT_HASH})")
+          git push -f origin "${NIGHTLY_RELEASE_COMMIT}:nightly"
+
   generate-matrix:
+    needs: cut-nightly
+    # cut-nightly is skipped on every event except schedule; a skipped `needs`
+    # would skip this too without an explicit condition.
+    if: ${{ !failure() && !cancelled() }}
     uses: pytorch/test-infra/.github/workflows/generate_binary_build_matrix.yml@main
     with:
       package-type: wheel
@@ -29,7 +69,8 @@ jobs:
       with-rocm: disable
       python-versions: '["3.13"]'
   build:
-    needs: generate-matrix
+    needs: [cut-nightly, generate-matrix]
+    if: ${{ !failure() && !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +84,8 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/build_wheels_linux.yml@main
     with:
       repository: ${{ matrix.repository }}
-      ref: ""
+      # On the nightly cron, build the commit cut-nightly just pushed.
+      ref: ${{ github.event_name == 'schedule' && 'nightly' || '' }}
       test-infra-repository: pytorch/test-infra
       test-infra-ref: main
       build-matrix: ${{ needs.generate-matrix.outputs.matrix }}
