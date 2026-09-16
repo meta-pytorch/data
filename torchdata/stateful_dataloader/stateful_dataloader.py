@@ -24,6 +24,7 @@ import itertools
 import logging
 import queue
 import threading
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 
 from typing import Any, Dict, Iterable, List, Optional, TypeVar, Union
 
@@ -82,6 +83,76 @@ _T_co = TypeVar("_T_co", covariant=True)
 
 logger = logging.getLogger(__name__)
 
+
+def _start_worker_processes(workers, max_parallelism):
+    if max_parallelism == 1:
+        for worker in workers:
+            worker.start()
+        return
+
+    stop_starting = threading.Event()
+
+    def start_worker(worker):
+        if stop_starting.is_set():
+            return
+        try:
+            worker.start()
+        except BaseException:
+            stop_starting.set()
+            raise
+
+    with ThreadPoolExecutor(
+        max_workers=min(max_parallelism, len(workers)),
+        thread_name_prefix="StatefulDataLoaderWorkerStart",
+    ) as executor:
+        futures = [executor.submit(start_worker, worker) for worker in workers]
+        done, pending = wait(futures, return_when=FIRST_EXCEPTION)
+        failed_future = next(
+            (
+                future
+                for future in futures
+                if future in done
+                if not future.cancelled()
+                if future.exception() is not None
+            ),
+            None,
+        )
+        if failed_future is not None:
+            for future in pending:
+                future.cancel()
+
+    if failed_future is not None:
+        for future in futures:
+            if future is failed_future or future.cancelled():
+                continue
+            secondary_exception = future.exception()
+            if secondary_exception is not None:
+                logger.error(
+                    "An additional worker process failed to start",
+                    exc_info=(
+                        type(secondary_exception),
+                        secondary_exception,
+                        secondary_exception.__traceback__,
+                    ),
+                )
+        failed_future.result()
+
+
+def _clean_up_failed_workers(worker_launches, done_event, result_queue):
+    done_event.set()
+    for _, worker in worker_launches:
+        if worker.pid is not None and worker.is_alive():
+            worker.terminate()
+    for index_queue, worker in worker_launches:
+        if worker.pid is not None:
+            worker.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+            if worker.is_alive():
+                worker.kill()
+                worker.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+        index_queue.close()
+    result_queue.close()
+
+
 _INDEX_SAMPLER_STATE = "_index_sampler_state"
 _SAMPLER_ITER_STATE = "_sampler_iter_state"
 _SAMPLER_ITER_YIELDED = "_sampler_iter_yielded"
@@ -97,7 +168,8 @@ class StatefulDataLoader(DataLoader[_T_co]):
     checkpointing.
 
     All arguments are identical to ``torch.utils.data.DataLoader``, with
-    a new kwarg: ``snapshot_every_n_steps``.
+    additional ``snapshot_every_n_steps`` and
+    ``spawn_worker_start_parallelism`` keyword arguments.
 
     Args:
         dataset (Dataset): dataset from which to load the data.
@@ -151,6 +223,10 @@ class StatefulDataLoader(DataLoader[_T_co]):
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
         snapshot_every_n_steps (int, optional): Defines how often the state is
             transferred from the dataloader workers to the dataloader. By default, it is set to ``1``, i.e., state is transferred every step. If the state is large, this value can be increased (and ideally set to the frequency of training checkpointing) to reduce the overhead of transferring state every step.
+        spawn_worker_start_parallelism (int, optional): Maximum number of worker
+            processes to start concurrently when using the ``spawn`` multiprocessing
+            context. Other multiprocessing contexts always start workers serially.
+            (default: ``1``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -210,6 +286,7 @@ class StatefulDataLoader(DataLoader[_T_co]):
         pin_memory_device: str = "",
         in_order: bool = True,
         snapshot_every_n_steps: Optional[int] = 1,
+        spawn_worker_start_parallelism: int = 1,
     ):
         torch._C._log_api_usage_once("python.stateful_data_loader")
 
@@ -220,6 +297,9 @@ class StatefulDataLoader(DataLoader[_T_co]):
 
         if timeout < 0:
             raise ValueError("timeout option should be non-negative")
+
+        if spawn_worker_start_parallelism < 1:
+            raise ValueError("spawn_worker_start_parallelism must be positive")
 
         if num_workers == 0 and prefetch_factor is not None:
             raise ValueError(
@@ -250,6 +330,7 @@ class StatefulDataLoader(DataLoader[_T_co]):
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
         self.in_order = in_order
+        self.spawn_worker_start_parallelism = spawn_worker_start_parallelism
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
@@ -948,43 +1029,62 @@ class _StatefulMultiProcessingDataLoaderIter(_StatefulBaseDataLoaderIter):
                 _SHARED_SEED, self._shared_seed
             )
 
-        for i in range(self._num_workers):
-            # No certainty which module multiprocessing_context is
-            index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
-            # Need to `cancel_join_thread` here!
-            # See sections (2) and (3b) above.
-            index_queue.cancel_join_thread()
+        worker_start_parallelism = loader.spawn_worker_start_parallelism
+        uses_spawn_context = multiprocessing_context.get_start_method() == "spawn"
+        start_workers_in_parallel = worker_start_parallelism > 1 and uses_spawn_context
+        worker_launches = []
+        try:
+            for i in range(self._num_workers):
+                # No certainty which module multiprocessing_context is
+                index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
+                # Need to `cancel_join_thread` here!
+                # See sections (2) and (3b) above.
+                index_queue.cancel_join_thread()
 
-            w = multiprocessing_context.Process(
-                target=_worker_loop,
-                args=(
-                    self._dataset_kind,
-                    self._dataset,
-                    index_queue,
-                    self._worker_result_queue,
-                    self._workers_done_event,
-                    self._auto_collation,
-                    self._collate_fn,
-                    self._drop_last,
-                    self._base_seed,
-                    self._worker_init_fn,
-                    i,
-                    self._num_workers,
-                    self._persistent_workers,
-                    self._shared_seed,
-                    worker_states[self._worker_key(i)],
-                ),
+                w = multiprocessing_context.Process(
+                    target=_worker_loop,
+                    args=(
+                        self._dataset_kind,
+                        self._dataset,
+                        index_queue,
+                        self._worker_result_queue,
+                        self._workers_done_event,
+                        self._auto_collation,
+                        self._collate_fn,
+                        self._drop_last,
+                        self._base_seed,
+                        self._worker_init_fn,
+                        i,
+                        self._num_workers,
+                        self._persistent_workers,
+                        self._shared_seed,
+                        worker_states[self._worker_key(i)],
+                    ),
+                )
+                w.daemon = True
+                worker_launches.append((index_queue, w))
+                if not start_workers_in_parallel:
+                    w.start()
+                    self._index_queues.append(index_queue)
+                    self._workers.append(w)
+
+            if start_workers_in_parallel:
+                _start_worker_processes(
+                    [worker for _, worker in worker_launches],
+                    worker_start_parallelism,
+                )
+                index_queues = [index_queue for index_queue, _ in worker_launches]
+                self._index_queues.extend(index_queues)
+                self._workers.extend(worker for _, worker in worker_launches)
+        except BaseException:
+            _clean_up_failed_workers(
+                worker_launches,
+                self._workers_done_event,
+                self._worker_result_queue,
             )
-            w.daemon = True
-            # NB: Process.start() actually take some time as it needs to
-            #     start a process and pass the arguments over via a pipe.
-            #     Therefore, we only add a worker to self._workers list after
-            #     it started, so that we do not call .join() if program dies
-            #     before it starts, and __del__ tries to join but will get:
-            #     AssertionError: can only join a started process.
-            w.start()
-            self._index_queues.append(index_queue)
-            self._workers.append(w)
+            self._index_queues.clear()
+            self._workers.clear()
+            raise
 
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
