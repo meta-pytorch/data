@@ -53,3 +53,26 @@ class TestLoader(TestCase):
         length = 10
         node = MapStyleWrapper(DummyMapDataset(length), sampler=range(length))
         self._test_loader_correct_state_dict_at_midpoint(node, length)
+
+    def test_loader_restores_before_none_item(self) -> None:
+        loader = Loader(IterableWrapper([0, None, 2]))
+        iterator = iter(loader)
+        self.assertEqual(next(iterator), 0)
+        state_dict = loader.state_dict()
+
+        restored = Loader(IterableWrapper([0, None, 2]))
+        restored.load_state_dict(state_dict)
+
+        self.assertEqual(list(restored), [None, 2])
+
+    def test_loader_reset_clears_cached_state_dict(self) -> None:
+        checkpoint_source = Loader(IterableWrapper([0, 1, 2]))
+        self.assertEqual(next(iter(checkpoint_source)), 0)
+        state_dict = checkpoint_source.state_dict()
+
+        loader = Loader(IterableWrapper([0, 1, 2]))
+        self.assertTrue(iter(loader).has_next())
+        loader.load_state_dict(state_dict)
+        iter(loader)
+
+        self.assertEqual(loader.state_dict(), state_dict)
