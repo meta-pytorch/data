@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from ._worker_info import get_worker_info
 from .adapters import IterableWrapper, MapStyleWrapper, SamplerWrapper
 from .base_node import BaseNode, T
 from .batch import Batcher, Collator, Unbatcher
@@ -19,7 +20,6 @@ from .samplers.stop_criteria import StopCriteria
 from .shuffler import Shuffler
 from .transforms import Compose
 from .types import Stateful
-
 
 __all__ = [
     "BaseNode",
@@ -43,6 +43,7 @@ __all__ = [
     "StopCriteria",
     "T",
     "Unbatcher",
+    "get_worker_info",
 ]
 
 assert sorted(__all__) == __all__
