@@ -6,6 +6,7 @@
 
 import math
 import unittest
+from copy import deepcopy
 
 import torch
 
@@ -100,6 +101,63 @@ class TestDataLoader(TestCase):
         self.assertEqual(sampler.next_yielded, 3)
         with self.assertRaises(ValueError):
             sampler.load_state_dict({"epoch": 0, "yielded": -1})
+
+    def test_sampler_state_dict_after_load(self):
+        for rank in range(3):
+            for shuffle in (False, True):
+                for epoch in (0, 3):
+                    for yielded in (0, 3, 34):
+                        with self.subTest(rank=rank, shuffle=shuffle, epoch=epoch, yielded=yielded):
+                            sampler = StatefulDistributedSampler(
+                                self.dataset, num_replicas=3, rank=rank, shuffle=shuffle, seed=42
+                            )
+                            sampler.set_epoch(epoch)
+                            iterator = iter(sampler)
+                            for _ in range(yielded):
+                                next(iterator)
+                            state = deepcopy(sampler.state_dict())
+                            expected = list(iterator)
+
+                            restored = StatefulDistributedSampler(
+                                self.dataset, num_replicas=3, rank=rank, shuffle=shuffle, seed=42
+                            )
+                            restored.load_state_dict(state)
+                            restored_state = deepcopy(restored.state_dict())
+                            self.assertEqual(list(restored), expected)
+
+                            restored_again = StatefulDistributedSampler(
+                                self.dataset, num_replicas=3, rank=rank, shuffle=shuffle, seed=42
+                            )
+                            restored_again.load_state_dict(restored_state)
+                            self.assertEqual(list(restored_again), expected)
+
+    def test_dataloader_state_dict_after_load(self):
+        for rank in range(2):
+            for shuffle in (False, True):
+                with self.subTest(rank=rank, shuffle=shuffle):
+
+                    def make_loader():
+                        sampler = StatefulDistributedSampler(
+                            self.dataset, num_replicas=2, rank=rank, shuffle=shuffle, seed=42
+                        )
+                        sampler.set_epoch(3)
+                        return StatefulDataLoader(self.dataset, batch_size=10, sampler=sampler, num_workers=0)
+
+                    loader = make_loader()
+                    iterator = iter(loader)
+                    next(iterator)
+                    next(iterator)
+                    state = deepcopy(loader.state_dict())
+                    expected = [batch.tolist() for batch in iterator]
+
+                    restored = make_loader()
+                    restored.load_state_dict(state)
+                    restored_state = deepcopy(restored.state_dict())
+                    self.assertEqual([batch.tolist() for batch in restored], expected)
+
+                    restored_again = make_loader()
+                    restored_again.load_state_dict(restored_state)
+                    self.assertEqual([batch.tolist() for batch in restored_again], expected)
 
     def test_sampler_next_yielded(self):
 

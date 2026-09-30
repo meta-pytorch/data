@@ -207,7 +207,9 @@ class StatefulDistributedSampler(torch.utils.data.distributed.DistributedSampler
             yield idx
 
     def state_dict(self) -> Dict[str, Any]:
-        return {self._YIELDED: self.yielded, self._EPOCH: self.epoch, "NEXT_YIELDED": self.next_yielded}
+        # A loaded position is pending until the next iterator starts.
+        yielded = self.yielded if self.next_yielded is None else self.next_yielded
+        return {self._YIELDED: yielded, self._EPOCH: self.epoch, "NEXT_YIELDED": self.next_yielded}
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         if self._EPOCH not in state_dict:
