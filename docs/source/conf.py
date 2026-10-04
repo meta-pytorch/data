@@ -19,7 +19,7 @@
 import os
 import sys
 
-import pytorch_sphinx_theme
+import pytorch_sphinx_theme2
 import torchdata
 
 # sys.path.insert(0, os.path.abspath('.'))
@@ -55,6 +55,10 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.doctest",
     "sphinx.ext.graphviz",
+    "sphinx_design",
+    "sphinx_sitemap",
+    "pytorch_sphinx_theme2",
+    "sphinxext.opengraph",
 ]
 
 # Do not execute standard reST doctest blocks so that documentation can
@@ -62,7 +66,10 @@ extensions = [
 doctest_test_doctest_blocks = ""
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ["_templates"]
+templates_path = [
+    "_templates",
+    os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
+]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -75,17 +82,50 @@ exclude_patterns = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-# html_theme = 'alabaster'
-html_theme = "pytorch_sphinx_theme"
-html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
+html_theme = "pytorch_sphinx_theme2"
+html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
+
+# OpenGraph settings
+ogp_site_url = "https://pytorch.org/data/"
+ogp_image = "https://pytorch.org/assets/images/social-share.jpg"
+
+# Theme options
+theme_variables = pytorch_sphinx_theme2.get_theme_variables()
 
 html_theme_options = {
-    "collapse_navigation": False,
+    "navigation_with_keys": False,
+    "analytics_id": "GTM-T8XT4PS",
+    "logo": {
+        "text": "TorchData",
+    },
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/pytorch/data",
+            "icon": "fa-brands fa-github",
+        },
+        {
+            "name": "PyPi",
+            "url": "https://pypi.org/project/torchdata/",
+            "icon": "fa-brands fa-python",
+        },
+    ],
+    "use_edit_page_button": True,
+    "navbar_center": "navbar-nav",
+    "navbar_start": ["pytorch_version"],
     "display_version": True,
-    "logo_only": True,
-    "pytorch_project": "docs",
-    "navigation_with_keys": True,
-    "analytics_id": "UA-117752657-2",
+}
+
+html_context = {
+    "theme_variables": theme_variables,
+    "display_github": True,
+    "github_url": "https://github.com",
+    "github_user": "pytorch",
+    "github_repo": "data",
+    "github_version": "main",
+    "doc_path": "docs/source",
+    "library_links": theme_variables.get("library_links", []),
+    "community_links": theme_variables.get("community_links", []),
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -93,9 +133,14 @@ html_theme_options = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_css_files = [
-    "css/custom.css",
+# Sitemap settings
+html_baseurl = f"https://pytorch.org/data/{version}/"
+sitemap_locales = [None]
+sitemap_excludes = [
+    "search.html",
+    "genindex.html",
 ]
+sitemap_url_scheme = "{link}"
 
 signature_replacements = {}
 

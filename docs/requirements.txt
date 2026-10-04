@@ -1,6 +1,8 @@
-sphinx==5.0.0
-# torch
-# PyTorch Theme
--e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
+sphinx>=7.2.0
+-e git+https://github.com/pytorch/pytorch_sphinx_theme.git@pytorch_sphinx_theme2#egg=pytorch_sphinx_theme2
+sphinx-design==0.6.1
+sphinx-sitemap==2.7.1
+sphinxext-opengraph
+docutils>=0.18.1,<0.21
 # For Graph Visualization
 graphviz
