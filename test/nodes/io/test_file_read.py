@@ -6,6 +6,8 @@
 
 """Tests for universal FileReader."""
 
+import bz2
+import gzip
 import uuid
 from typing import Any, Dict, List, Union
 from unittest.mock import MagicMock, mock_open, patch
@@ -13,7 +15,7 @@ from unittest.mock import MagicMock, mock_open, patch
 import boto3
 import pytest
 from moto import mock_aws
-from torchdata.nodes import BaseNode
+from torchdata.nodes import BaseNode, IterableWrapper
 
 from torchdata.nodes.io.file_read import _fibonacci_backoff, FileReader
 
@@ -331,8 +333,52 @@ def test_file_reader_compression_handling():
 
         # Verify smart_open was called with compression parameters
         mock_smart_open.assert_called_once_with(
-            "s3://bucket/compressed.txt.gz", "r", encoding="utf-8", transport_params={"compression": ".gz"}
+            "s3://bucket/compressed.txt.gz", "r", encoding="utf-8", transport_params={}, compression=".gz"
         )
+
+
+@pytest.mark.parametrize("compression,compress", [(".gz", gzip.compress), (".bz2", bz2.compress)])
+@pytest.mark.parametrize("mode", ["r", "rb"])
+def test_file_reader_forced_compression_real_files(tmp_path, compression, compress, mode):
+    payload = b"transcript one\ntranscript two\n"
+    paths = [tmp_path / "first.data", tmp_path / "second.data"]
+    for path in paths:
+        path.write_bytes(compress(payload))
+    items = [{"data": str(path), "metadata": {"split": "train"}} for path in paths]
+    options = {"compression": compression}
+    reader = FileReader(IterableWrapper(items), mode=mode, transport_params=options)
+    expected = payload if mode == "rb" else payload.decode("utf-8")
+    assert next(reader)["data"] == expected
+    state = reader.state_dict()
+
+    restored = FileReader(IterableWrapper(items), mode=mode, transport_params=options)
+    restored.reset(state)
+    result = next(restored)
+    assert result["data"] == expected
+    assert result["metadata"] == {"file_path": str(paths[1]), "split": "train"}
+    assert options == {"compression": compression}
+    with pytest.raises(StopIteration):
+        next(restored)
+
+
+@pytest.mark.parametrize("compression,compress", [(".gz", gzip.compress), (".bz2", bz2.compress)])
+def test_file_reader_disabled_compression_real_files(tmp_path, compression, compress):
+    path = tmp_path / ("transcripts" + compression)
+    compressed = compress(b"transcript one\n")
+    path.write_bytes(compressed)
+    options = {"compression": "disable"}
+    reader = FileReader(IterableWrapper([{"data": str(path)}]), mode="rb", transport_params=options)
+    assert next(reader)["data"] == compressed
+    assert options == {"compression": "disable"}
+
+
+@pytest.mark.parametrize("compression,compress", [(".gz", gzip.compress), (".bz2", bz2.compress)])
+def test_file_reader_inferred_compression_real_files(tmp_path, compression, compress):
+    path = tmp_path / ("transcripts" + compression)
+    payload = b"transcript one\n"
+    path.write_bytes(compress(payload))
+    reader = FileReader(IterableWrapper([{"data": str(path)}]))
+    assert next(reader)["data"] == payload.decode("utf-8")
 
 
 def test_file_reader_error_handling():
