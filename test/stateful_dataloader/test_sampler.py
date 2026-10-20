@@ -238,5 +238,113 @@ class TestDataLoader(TestCase):
         self.assertNotEqual(results1, results3, "Data should not be replicable with different seed")
 
 
+class TestRandomSamplerCheckpoint(TestCase):
+    def test_shared_generator_checkpoint(self):
+        for replacement in (False, True):
+            boundary = 32 if replacement else 10
+            num_samples = 2 * boundary + 3
+            for shared in (False, True):
+                for position in (0, boundary - 1, boundary, boundary + 1, num_samples):
+                    with self.subTest(replacement=replacement, shared=shared, position=position):
+
+                        def make_loader():
+                            generator = torch.Generator().manual_seed(42)
+                            sampler = RandomSampler(range(10), replacement, num_samples, generator)
+                            loader_generator = generator if shared else torch.Generator().manual_seed(99)
+                            return (
+                                StatefulDataLoader(
+                                    range(10), batch_size=None, sampler=sampler, generator=loader_generator
+                                ),
+                                generator,
+                            )
+
+                        loader, generator = make_loader()
+                        iterator = iter(loader)
+                        for _ in range(position):
+                            next(iterator)
+                        # Other users of the shared RNG may draw between permutations and checkpoints.
+                        if shared:
+                            torch.rand(3, generator=generator)
+                        state = loader.state_dict()
+                        expected = list(iterator)
+                        expected_draw = torch.rand(4, generator=generator)
+                        expected_epoch = list(loader)
+
+                        resumed, resumed_generator = make_loader()
+                        resumed.load_state_dict(state)
+                        self.assertEqual(list(resumed), expected)
+                        self.assertEqual(torch.rand(4, generator=resumed_generator), expected_draw)
+                        self.assertEqual(list(resumed), expected_epoch)
+
+    def test_default_shuffle_subsequent_epoch(self):
+        for finished in (False, True):
+            with self.subTest(finished=finished):
+
+                def make_loader():
+                    return StatefulDataLoader(
+                        range(10), batch_size=2, shuffle=True, generator=torch.Generator().manual_seed(42)
+                    )
+
+                loader = make_loader()
+                iterator = iter(loader)
+                if finished:
+                    list(iterator)
+                else:
+                    next(iterator)
+                state = loader.state_dict()
+                expected = list(loader) if finished else list(iterator)
+                expected_epoch = list(loader)
+                resumed = make_loader()
+                resumed.load_state_dict(state)
+                self.assertEqual(list(resumed), expected)
+                self.assertEqual(list(resumed), expected_epoch)
+
+    def test_prefetched_shared_generator_checkpoint(self):
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+
+                def make_loader():
+                    generator = torch.Generator().manual_seed(42)
+                    sampler = RandomSampler(range(10), replacement, 70, generator)
+                    return StatefulDataLoader(
+                        range(10),
+                        batch_size=2,
+                        sampler=sampler,
+                        generator=generator,
+                        num_workers=2,
+                        multiprocessing_context="spawn",
+                        snapshot_every_n_steps=2,
+                    )
+
+                loader = make_loader()
+                iterator = iter(loader)
+                for _ in range(3):
+                    next(iterator)
+                state = loader.state_dict()
+                expected = list(iterator)
+                expected_epoch = list(loader)
+                resumed = make_loader()
+                resumed.load_state_dict(state)
+                self.assertEqual(list(resumed), expected)
+                self.assertEqual(list(resumed), expected_epoch)
+
+    def test_legacy_sampler_checkpoint(self):
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+                sampler = RandomSampler(range(10), replacement, 70, torch.Generator().manual_seed(42))
+                iterator = iter(sampler)
+                for _ in range(35):
+                    next(iterator)
+                state = iterator.state_dict()
+                legacy_state = {key: state[key] for key in ("generator", "yielded")}
+                expected = list(iterator)
+                expected_draw = torch.rand(4, generator=sampler.generator)
+                resumed_sampler = RandomSampler(range(10), replacement, 70, torch.Generator().manual_seed(99))
+                resumed = iter(resumed_sampler)
+                resumed.load_state_dict(legacy_state)
+                self.assertEqual(list(resumed), expected)
+                self.assertEqual(torch.rand(4, generator=resumed_sampler.generator), expected_draw)
+
+
 if __name__ == "__main__":
     run_tests()

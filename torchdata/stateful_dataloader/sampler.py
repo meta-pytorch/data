@@ -17,6 +17,9 @@ from .stateful import Stateful
 
 class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
     _GENERATOR = "generator"
+    _PERM_GENERATOR = "perm_generator"
+    _GENERATOR_CURRENT = "generator_current"
+    _PERM_INDEX = "perm_index"
     _YIELDED = "yielded"
 
     def __init__(self, sampler):
@@ -36,6 +39,7 @@ class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
         return self
 
     def _get_perm(self) -> List[int]:
+        self.perm_generator_state = self.sampler.generator.get_state()
         if self.replacement:
             return torch.randint(
                 high=self.n,
@@ -61,13 +65,27 @@ class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
         return {
             self._YIELDED: self.yielded,
             self._GENERATOR: self.generator_state,
+            self._PERM_GENERATOR: self.perm_generator_state,
+            self._GENERATOR_CURRENT: self.sampler.generator.get_state(),
+            self._PERM_INDEX: self.perm_index,
         }
 
     def load_state_dict(self, state_dict: dict) -> None:
         self.next_yielded = state_dict[self._YIELDED]
         self.generator_state = state_dict[self._GENERATOR]
-        self.sampler.generator.set_state(self.generator_state)
+        if self._PERM_GENERATOR in state_dict:
+            # Regenerate only the cached permutation, then restore any shared RNG draws
+            # made since it was generated (for example, the DataLoader's base seed).
+            self.sampler.generator.set_state(state_dict[self._PERM_GENERATOR])
+            self.perm = self._get_perm()
+            self.perm_index = state_dict[self._PERM_INDEX]
+            self.yielded = state_dict[self._YIELDED]
+            self.next_yielded = None
+            self.sampler.generator.set_state(state_dict[self._GENERATOR_CURRENT])
+            return
 
+        # Older checkpoints contain only the initial RNG state and yielded count.
+        self.sampler.generator.set_state(self.generator_state)
         if self.next_yielded is not None:
             self.perm = self._get_perm()  # We want permutations from the latest generator state that's loaded
             for _ in range(self.next_yielded):
