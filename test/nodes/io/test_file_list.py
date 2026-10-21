@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from torchdata.nodes import Loader, Shuffler
 from torchdata.nodes.io.file_list import FileLister
 
 # Set up logging
@@ -516,3 +517,39 @@ def test_file_list_reset_without_state(sample_local_files):
     # Should start from beginning
     first_item = next(iter(node))
     assert first_item["metadata"]["fs_protocol"] == "file"
+
+
+@pytest.mark.parametrize("num_files", [0, 2])
+def test_file_list_restore_exhausted(tmp_path, num_files):
+    for index in range(num_files):
+        (tmp_path / f"{index}.txt").write_text("sample")
+    node = FileLister(str(tmp_path), ["*.txt"])
+    assert len(list(node)) == num_files
+    state = node.state_dict()
+    assert state["current_idx"] == state["num_files"] == num_files
+
+    restored = FileLister(str(tmp_path), ["*.txt"])
+    restored.reset(state)
+    assert list(restored) == []
+    assert restored.state_dict() == state
+
+
+def test_file_list_restore_with_buffered_shuffle(tmp_path):
+    for index in range(2):
+        (tmp_path / f"{index}.txt").write_text("sample")
+
+    def make_loader():
+        source = FileLister(str(tmp_path), ["*.txt"])
+        return Loader(Shuffler(source, buffer_size=2, seed=42))
+
+    loader = make_loader()
+    iterator = iter(loader)
+    first = next(iterator)
+    state = loader.state_dict()
+    remaining = list(iterator)
+    assert len(remaining) == 1
+    assert first != remaining[0]
+
+    restored = make_loader()
+    restored.load_state_dict(state)
+    assert list(restored) == remaining

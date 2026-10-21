@@ -13,7 +13,6 @@ torchdata/datapipes/map/__init__.pyi
 *.swp
 *.swm
 *~
-.vscode
 .idea
 
 # macOS dir files
@@ -55,3 +54,5 @@ third_party/aws_sdk
 
 # Release Notes
 scripts/release_notes/results
+config.bat
+node_modules

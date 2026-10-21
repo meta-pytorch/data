@@ -162,7 +162,7 @@ class FileLister(BaseNode[Dict]):
             # Restore current index and validate bounds
             self._current_idx = initial_state.get(self.CURRENT_IDX_KEY, 0)
 
-            if self._current_idx >= len(self._file_paths):
+            if self._current_idx > len(self._file_paths):
                 raise ValueError(
                     f"State validation failed: saved index {self._current_idx} is out of bounds "
                     f"for current file list (length: {len(self._file_paths)}). "
