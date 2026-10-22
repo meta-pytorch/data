@@ -150,7 +150,12 @@ class MultiNodeRoundRobinSampler(BaseNode[Union[T, Dict[str, Any]]]):
                 # If StopCriteria is CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED,
                 # reset the iterator and try again
                 self.source_nodes[self._current_dataset_index].reset()
-                item = next(self.source_nodes[self._current_dataset_index])
+                try:
+                    item = next(self.source_nodes[self._current_dataset_index])
+                except StopIteration:
+                    # An empty source cannot be restarted. Continue with the other datasets.
+                    self._current_dataset_index = (self._current_dataset_index + 1) % self.num_datasets
+                    continue
             break
         # Capture dataset information before incrementing index
         dataset_idx = self._current_dataset_index

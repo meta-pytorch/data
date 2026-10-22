@@ -167,11 +167,15 @@ class MultiNodeWeightedSampler(BaseNode[T]):
 
     def next(self) -> T:
         self._started = True
+        empty_sources: Optional[set[str]] = None
         while True:
             self._check_for_stop_iteration()
 
             # Fetch the next item's key from the weighted sampler
-            key = next(self._weighted_sampler)
+            if empty_sources:
+                key = self._weighted_sampler.sample_without(empty_sources)
+            else:
+                key = next(self._weighted_sampler)
             try:
                 if self._datasets_exhausted[key] and self.stop_criteria == StopCriteria.ALL_DATASETS_EXHAUSTED:
                     # Before fetching a new item check if key corresponds to an already
@@ -192,7 +196,13 @@ class MultiNodeWeightedSampler(BaseNode[T]):
                 # If StopCriteria is CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED or CYCLE_FOREVER,
                 # reset the iterator and try again
                 self.source_nodes[key].reset()
-                item = next(self.source_nodes[key])
+                try:
+                    item = next(self.source_nodes[key])
+                except StopIteration:
+                    if empty_sources is None:
+                        empty_sources = set()
+                    empty_sources.add(key)
+                    continue
             break
 
         # If we did't throw StopIteration, increment the number of items yielded and return the item
@@ -225,6 +235,7 @@ class _WeightedSampler:
     - g_state: The state of the random number generator.
     - g_rank_state: The state of the random number generator for the rank.
     - offset: The offset of the batch of indices.
+    - resample_g_state: Optional RNG state for sampling after an empty source is encountered.
 
     Args:
         weights (Dict[str, float]): A dictionary of weights for each source node.
@@ -262,6 +273,8 @@ class _WeightedSampler:
         self.epoch = epoch
         seed = _get_rank_seed(seed, self._g_rank, rank, world_size, self.epoch)
         self._g.manual_seed(seed)
+        self._resample_seed = (seed + 1) % (1 << 64)
+        self._resample_generator: Optional[torch.Generator] = None
 
         self._g_snapshot = self._g.get_state()
         if initial_state is not None:
@@ -271,6 +284,25 @@ class _WeightedSampler:
             self._offset = 0
 
         self._batch_of_indices = self._get_batch_of_indices()
+        if initial_state is not None and "resample_g_state" in initial_state:
+            self._resample_generator = torch.Generator()
+            self._resample_generator.set_state(initial_state["resample_g_state"])
+
+    def sample_without(self, excluded: set[str]) -> str:
+        # Rejection sampling may never find a low-weight nonempty source. Draw directly
+        # from the remaining weights, using a separate checkpointed RNG so the normal
+        # batched sampling sequence remains unchanged when no empty source is encountered.
+        indices = [i for i, name in enumerate(self.names) if name not in excluded]
+        if not indices:
+            raise StopIteration
+        if self._resample_generator is None:
+            self._resample_generator = torch.Generator().manual_seed(self._resample_seed)
+        index = int(
+            torch.multinomial(
+                self.weights[indices], num_samples=1, replacement=True, generator=self._resample_generator
+            ).item()
+        )
+        return self.names[indices[index]]
 
     def _get_batch_of_indices(self) -> list[int]:
         self._g_snapshot = self._g.get_state()
@@ -293,7 +325,10 @@ class _WeightedSampler:
         return self.names[item]
 
     def state_dict(self):
-        return {
+        state = {
             "g_state": self._g_snapshot,
             "offset": self._offset,
         }
+        if self._resample_generator is not None:
+            state["resample_g_state"] = self._resample_generator.get_state()
+        return state
