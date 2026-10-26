@@ -653,7 +653,8 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
                         f"resumes, please implement `state_dict` and `load_state_dict` in your IterableDataset and/or iterator."
                     )
                     for _ in range(self._num_yielded):
-                        next(self)
+                        # Replay the dataset without advancing the restored loader counters.
+                        self._dataset_fetcher.fetch(next(self._sampler_iter))
         self._finished = state_dict[_ITERATOR_FINISHED]
 
 
