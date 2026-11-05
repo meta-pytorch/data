@@ -80,4 +80,5 @@ jobs:
       env-var-script: packaging/env-var-script.txt
       # The reusable workflow uploads only for `schedule`, so a manual run that asks to
       # publish is reported to it as one.
-      trigger-event: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish) && 'schedule' || github.event_name }}
+      trigger-event:
+        ${{ (github.event_name == 'workflow_dispatch' && inputs.publish) && 'schedule' || github.event_name }}
