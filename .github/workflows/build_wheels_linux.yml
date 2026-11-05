@@ -16,6 +16,11 @@ on:
     # our nightly branch for us. Builds main.
     - cron: 30 11 * * *
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload the wheels to the nightly index, built from the selected branch
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -29,11 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Record the commit this build is made from
+        env:
+          PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
         run: |
           {
             echo "### Source commit"
             echo "[\`${GITHUB_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
-            echo "ref \`${GITHUB_REF_NAME}\`, event \`${GITHUB_EVENT_NAME}\`"
+            echo "ref \`${GITHUB_REF_NAME}\`, event \`${GITHUB_EVENT_NAME}\`, publish \`${PUBLISH}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
   generate-matrix:
@@ -71,4 +78,6 @@ jobs:
       smoke-test-script: ${{ matrix.smoke-test-script }}
       package-name: ${{ matrix.package-name }}
       env-var-script: packaging/env-var-script.txt
-      trigger-event: ${{ github.event_name }}
+      # The reusable workflow uploads only for `schedule`, so a manual run that asks to
+      # publish is reported to it as one.
+      trigger-event: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish) && 'schedule' || github.event_name }}

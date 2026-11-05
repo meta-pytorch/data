@@ -40,8 +40,11 @@ def _get_version():
         pass
 
     os_build_version = os.getenv("BUILD_VERSION")
+    nightly_date = os.getenv("NIGHTLY_DATE")
     if os_build_version:
         version = os_build_version
+    elif nightly_date:
+        version = version.removesuffix("a0") + ".dev" + nightly_date
     elif sha != "Unknown":
         version += "+" + sha[:7]
 

@@ -1,1 +1,5 @@
 export MACOSX_DEPLOYMENT_TARGET="10.13"
+# Nightly wheels are named torchdata-<version>.dev<NIGHTLY_DATE>, see setup.py
+if [[ "${CHANNEL:-nightly}" == "nightly" ]]; then
+    export NIGHTLY_DATE="${NIGHTLY_DATE:-$(date -u +%Y%m%d)}"
+fi
