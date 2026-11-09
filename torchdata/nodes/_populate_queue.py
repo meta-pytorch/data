@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 import queue
 import threading
 from typing import Any, Dict, Optional, Union
@@ -60,7 +61,10 @@ def _populate_queue(
         assert (
             isinstance(snapshot_frequency, int) and snapshot_frequency >= 0
         ), f"snapshot_frequency must be non-negative integer! Got {snapshot_frequency}"
-        snapshot_store.append_initial_snapshot(snapshot=source.state_dict())
+        snapshot = source.state_dict()
+        if snapshot is not None:
+            snapshot = copy.deepcopy(snapshot)
+        snapshot_store.append_initial_snapshot(snapshot=snapshot)
     except Exception:
         e = StartupExceptionWrapper(where="in _populate_queue startup for device")
         snapshot_store.append_initial_snapshot(snapshot=e)
@@ -76,6 +80,8 @@ def _populate_queue(
             snapshot = None
             if snapshot_frequency > 0 and yielded % snapshot_frequency == 0:
                 snapshot = source.state_dict()
+                if snapshot is not None:
+                    snapshot = copy.deepcopy(snapshot)
             _put(item, block=False, snapshot=snapshot)
         except StopIteration as e:
             _put(e, block=False)
