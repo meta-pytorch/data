@@ -225,6 +225,7 @@ class _WeightedSampler:
     - g_state: The state of the random number generator.
     - g_rank_state: The state of the random number generator for the rank.
     - offset: The offset of the batch of indices.
+    - names: The source names corresponding to the sampled indices.
 
     Args:
         weights (Dict[str, float]): A dictionary of weights for each source node.
@@ -246,13 +247,12 @@ class _WeightedSampler:
         random_tensor_batch_size: int = 1000,
         initial_state: Optional[Dict[str, Any]] = None,
     ):
-        _names, _weights = [], []
-        for name, weight in weights.items():
-            _names.append(name)
-            _weights.append(weight)
-
-        self.names = _names
-        self.weights = torch.tensor(_weights, dtype=torch.float64)
+        self.names = list(weights)
+        if initial_state is not None and "names" in initial_state:
+            self.names = list(initial_state["names"])
+            if set(self.names) != set(weights):
+                raise ValueError("The source names in the checkpoint must match the weights keys")
+        self.weights = torch.tensor([weights[name] for name in self.names], dtype=torch.float64)
 
         self.random_tensor_batch_size = random_tensor_batch_size
 
@@ -296,4 +296,5 @@ class _WeightedSampler:
         return {
             "g_state": self._g_snapshot,
             "offset": self._offset,
+            "names": list(self.names),
         }
