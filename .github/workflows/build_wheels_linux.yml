@@ -50,6 +50,10 @@ jobs:
       os: linux
       test-infra-repository: pytorch/test-infra
       test-infra-ref: main
+      # Linux rows get OSDC (ARC) labels: mt-l-x86iavx512-8-64 on pull requests,
+      # the release-isolated mt-rel-l-x86iavx512-44-340 on main, nightly, release/*
+      # and v* tags.
+      runner-fleet: osdc
       with-cuda: disable
       with-rocm: disable
       python-versions: '["3.13"]'
