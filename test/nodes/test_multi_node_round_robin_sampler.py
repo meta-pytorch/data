@@ -553,6 +553,35 @@ class TestMultiNodeRoundRobinSampler(TestCase):
 
     @parameterized.expand(
         itertools.product(
+            [
+                StopCriteria.ALL_DATASETS_EXHAUSTED,
+                StopCriteria.FIRST_DATASET_EXHAUSTED,
+                StopCriteria.CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED,
+            ],
+            [True, False],
+        )
+    )
+    def test_loader_reuses_checkpoint(self, stop_criteria: str, restart_on_stop_iteration: bool) -> None:
+        def make_loader():
+            datasets = self.get_unequal_dataset(2, 2)
+            sampler = MultiNodeRoundRobinSampler(datasets, stop_criteria)
+            return Loader(sampler, restart_on_stop_iteration=restart_on_stop_iteration)
+
+        loader = make_loader()
+        iterator = iter(loader)
+        next(iterator)
+        checkpoint = loader.state_dict()
+        expected = list(iterator)
+        self.assertTrue(expected)
+
+        # A retry from the same checkpoint must replay the same remaining samples.
+        for _ in range(2):
+            resumed_loader = make_loader()
+            resumed_loader.load_state_dict(checkpoint)
+            self.assertEqual(list(resumed_loader), expected)
+
+    @parameterized.expand(
+        itertools.product(
             [100, 500, 1200],
             [
                 StopCriteria.ALL_DATASETS_EXHAUSTED,

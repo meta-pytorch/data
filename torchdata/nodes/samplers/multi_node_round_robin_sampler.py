@@ -102,7 +102,7 @@ class MultiNodeRoundRobinSampler(BaseNode[Union[T, Dict[str, Any]]]):
         super().reset(initial_state)
         if initial_state is not None:
             self._validate_reset_dataset_keys(initial_state[self.DATASET_KEYS])
-            self._datasets_exhausted = initial_state[self.DATASETS_EXHAUSTED_KEY]
+            self._datasets_exhausted = initial_state[self.DATASETS_EXHAUSTED_KEY].copy()
             for k in range(self.num_datasets):
                 self.source_nodes[k].reset(initial_state[self.DATASET_NODE_STATES_KEY][k])
             self._current_dataset_index = initial_state[self.CURRENT_DATASET_INDEX_KEY]

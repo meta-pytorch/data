@@ -121,7 +121,7 @@ class MultiNodeWeightedSampler(BaseNode[T]):
             self._num_yielded = initial_state[self.NUM_YIELDED_KEY]
             self._epoch = initial_state[self.EPOCH_KEY]
             self._weighted_sampler = self._get_new_weighted_sampler(initial_state)
-            self._datasets_exhausted = initial_state[self.DATASETS_EXHAUSTED_KEY]
+            self._datasets_exhausted = initial_state[self.DATASETS_EXHAUSTED_KEY].copy()
             for k in self.dataset_names:
                 self.source_nodes[k].reset(initial_state[self.DATASET_NODE_STATES_KEY][k])
         else:

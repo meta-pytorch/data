@@ -9,6 +9,7 @@ import itertools
 from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase
 from torchdata.nodes.adapters import IterableWrapper
+from torchdata.nodes.loader import Loader
 from torchdata.nodes.prefetch import Prefetcher
 
 from torchdata.nodes.samplers.multi_node_weighted_sampler import MultiNodeWeightedSampler
@@ -36,6 +37,38 @@ class TestMultiNodeWeightedSampler(TestCase):
             from torchdata.nodes import MultiNodeWeightedSampler, StopCriteria  # noqa
         except ImportError:
             self.fail("MultiNodeWeightedSampler or StopCriteria failed to import")
+
+    @parameterized.expand(
+        itertools.product(
+            [
+                StopCriteria.ALL_DATASETS_EXHAUSTED,
+                StopCriteria.FIRST_DATASET_EXHAUSTED,
+                StopCriteria.CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED,
+            ],
+            [True, False],
+        )
+    )
+    def test_loader_reuses_checkpoint(self, stop_criteria: str, restart_on_stop_iteration: bool) -> None:
+        def make_loader():
+            datasets = {
+                "a": IterableWrapper(DummyIterableDataset(2, "a")),
+                "b": IterableWrapper(DummyIterableDataset(3, "b")),
+            }
+            sampler = MultiNodeWeightedSampler(datasets, {"a": 1.0, "b": 1.0}, stop_criteria, seed=42)
+            return Loader(sampler, restart_on_stop_iteration=restart_on_stop_iteration)
+
+        loader = make_loader()
+        iterator = iter(loader)
+        next(iterator)
+        checkpoint = loader.state_dict()
+        expected = list(iterator)
+        self.assertTrue(expected)
+
+        # A retry from the same checkpoint must replay the same remaining samples.
+        for _ in range(2):
+            resumed_loader = make_loader()
+            resumed_loader.load_state_dict(checkpoint)
+            self.assertEqual(list(resumed_loader), expected)
 
     def _setup_multi_node_weighted_sampler(
         self, num_samples, num_datasets, weights_fn, stop_criteria, seed=0
