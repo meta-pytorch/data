@@ -203,6 +203,7 @@ class _ParallelMapperIter(Iterator[T]):
                     self._intermed_q,
                     self.map_fn,
                     self._stop,
+                    self.num_workers,
                 )
 
         elif self.method == "process":
@@ -214,6 +215,7 @@ class _ParallelMapperIter(Iterator[T]):
                     self._intermed_q,
                     self.map_fn,
                     self._mp_stop,
+                    self.num_workers,
                 )
                 self._workers.append(mp_context.Process(target=_apply_udf, args=_args, daemon=True))
             for t in self._workers:
