@@ -652,8 +652,13 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
                         f"naively fast-forwarding your dataset by {self._num_yielded} steps. For more efficient "
                         f"resumes, please implement `state_dict` and `load_state_dict` in your IterableDataset and/or iterator."
                     )
-                    for _ in range(self._num_yielded):
+                    num_to_skip = self._num_yielded
+                    for _ in range(num_to_skip):
                         next(self)
+                    # Replay via next(self) increments self._num_yielded and
+                    # self._sampler_iter_yielded, so restore the target counter.
+                    self._num_yielded = num_to_skip
+                    self._sampler_iter_yielded = state_dict[_SAMPLER_ITER_YIELDED]
         self._finished = state_dict[_ITERATOR_FINISHED]
 
 
@@ -1178,8 +1183,10 @@ class _StatefulMultiProcessingDataLoaderIter(_StatefulBaseDataLoaderIter):
                         f"naively fast-forwarding your dataset by {self._num_yielded} steps. For more efficient "
                         f"resumes, please implement `state_dict` and `load_state_dict` in your IterableDataset and/or iterator."
                     )
-                    for _ in range(self._num_yielded):
+                    num_to_skip = self._num_yielded
+                    for _ in range(num_to_skip):
                         next(self)
+                    self._num_yielded = num_to_skip
                 # Check if last_yielded_worker_id matches
                 if self._last_yielded_worker_id != next_iter_state[self._SNAPSHOT][self._LAST_YIELDED_WORKER_ID]:
                     raise ValueError("last_yielded_worker_id does not match, the dataset may have changed")

@@ -1972,5 +1972,32 @@ class TestOutOfOrderWithCheckpointing(TestCase):
         self.assertNotEqual(output, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
 
 
+    def test_stateless_iterable_multiple_resumes_preserves_counter(self):
+        # Regression test for https://github.com/pytorch/data/issues/1567
+        from copy import deepcopy
+        from torch.utils.data import IterableDataset
+
+        class Stream(IterableDataset):
+            def __iter__(self):
+                yield from range(20)
+
+        def make_loader():
+            return StatefulDataLoader(Stream(), batch_size=None, num_workers=0)
+
+        original = make_loader()
+        it = iter(original)
+        first_items = [next(it) for _ in range(3)]
+        self.assertEqual(first_items, [0, 1, 2])
+        state1 = deepcopy(original.state_dict())
+
+        resumed = make_loader()
+        resumed.load_state_dict(state1)
+        state2 = deepcopy(resumed.state_dict())
+
+        resumed_again = make_loader()
+        resumed_again.load_state_dict(state2)
+        remaining = list(resumed_again)
+        self.assertEqual(remaining, list(range(3, 20)))
+
 if __name__ == "__main__":
     unittest.main()
