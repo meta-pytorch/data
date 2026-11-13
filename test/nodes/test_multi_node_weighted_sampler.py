@@ -4,11 +4,15 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import io
 import itertools
+from copy import deepcopy
 
+import torch
 from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase
 from torchdata.nodes.adapters import IterableWrapper
+from torchdata.nodes.loader import Loader
 from torchdata.nodes.prefetch import Prefetcher
 
 from torchdata.nodes.samplers.multi_node_weighted_sampler import MultiNodeWeightedSampler
@@ -18,6 +22,71 @@ from .utils import DummyIterableDataset, run_test_save_load_state
 
 
 class TestMultiNodeWeightedSampler(TestCase):
+    @parameterized.expand([(1.0, 5), (3.0, 5), (1.0, 1001), (3.0, 1001)])
+    def test_checkpoint_preserves_source_order(self, right_weight, checkpoint_after) -> None:
+        weights = {"left": 1.0, "right": right_weight}
+
+        def make_loader(ordered_weights):
+            sources = {name: IterableWrapper([f"{name}{i}" for i in range(1100)]) for name in weights}
+            return Loader(
+                MultiNodeWeightedSampler(sources, ordered_weights, StopCriteria.ALL_DATASETS_EXHAUSTED, seed=17),
+                restart_on_stop_iteration=False,
+            )
+
+        loader = make_loader(weights)
+        iterator = iter(loader)
+        for _ in range(checkpoint_after):
+            next(iterator)
+        checkpoint = deepcopy(loader.state_dict())
+        expected = list(iterator)
+
+        restored = make_loader(dict(reversed(list(weights.items()))))
+        restored.load_state_dict(deepcopy(checkpoint))
+        restored_iterator = iter(restored)
+        first_restored = next(restored_iterator)
+        serialized_checkpoint = io.BytesIO()
+        torch.save(restored.state_dict(), serialized_checkpoint)
+        self.assertEqual([first_restored] + list(restored_iterator), expected)
+
+        serialized_checkpoint.seek(0)
+        restored_again = make_loader(weights)
+        restored_again.load_state_dict(torch.load(serialized_checkpoint, weights_only=True))
+        self.assertEqual(list(restored_again), expected[1:])
+
+    def test_restore_weighted_sampler_with_different_sources(self) -> None:
+        def make_loader(names):
+            sources = {name: IterableWrapper(range(8)) for name in names}
+            return Loader(
+                MultiNodeWeightedSampler(sources, {name: 1.0 for name in names}),
+                restart_on_stop_iteration=False,
+            )
+
+        loader = make_loader(["a", "b"])
+        next(iter(loader))
+        checkpoint = loader.state_dict()
+        restored = make_loader(["a", "c"])
+        restored.load_state_dict(checkpoint)
+        with self.assertRaisesRegex(ValueError, "source names in the checkpoint must match"):
+            iter(restored)
+
+    def test_restore_legacy_weighted_sampler_checkpoint(self) -> None:
+        def make_loader():
+            sources = {"a": IterableWrapper(range(8)), "b": IterableWrapper(range(8, 16))}
+            return Loader(
+                MultiNodeWeightedSampler(sources, {"a": 1.0, "b": 2.0}, seed=17),
+                restart_on_stop_iteration=False,
+            )
+
+        loader = make_loader()
+        iterator = iter(loader)
+        next(iterator)
+        checkpoint = deepcopy(loader.state_dict())
+        checkpoint["root"]["weighted_sampler_state"].pop("names", None)
+        expected = list(iterator)
+        restored = make_loader()
+        restored.load_state_dict(checkpoint)
+        self.assertEqual(list(restored), expected)
+
     def setUp(self) -> None:
         super().setUp()
         self._num_samples = 10
