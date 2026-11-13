@@ -98,6 +98,7 @@ class LoaderIterator(BaseNode[T]):
         self.loader = loader
         self.root = loader.root
         self._cached_item = None
+        self._has_cached_item = False
         self._cached_state_dict: Optional[Dict[str, Any]] = None
         self._num_yielded = 0
 
@@ -110,22 +111,26 @@ class LoaderIterator(BaseNode[T]):
             self.root.reset(None)
             self._num_yielded = 0
         self._cached_item = None
+        self._has_cached_item = False
+        self._cached_state_dict = None
 
     def has_next(self) -> bool:
-        if self._cached_item is None:
+        if not self._has_cached_item:
             try:
                 # Cache the current state dict
                 self._cached_state_dict = self.state_dict()
                 # Load and save the next item
                 self._cached_item = next(self)
+                self._has_cached_item = True
             except StopIteration:
                 pass
-        return self._cached_item is not None
+        return self._has_cached_item
 
     def next(self):
-        if self._cached_item is not None:
+        if self._has_cached_item:
             item = self._cached_item
             self._cached_item = None
+            self._has_cached_item = False
             self._cached_state_dict = None
         else:
             item = next(self.root)
