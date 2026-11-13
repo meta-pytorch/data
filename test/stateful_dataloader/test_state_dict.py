@@ -524,6 +524,43 @@ class TestStatefulDataLoaderGenerator_shard2(TestStatefulDataLoaderIterable_shar
 
 
 class TestStatefulDataLoaderGeneratorNoState_shard2(TestStatefulDataLoaderIterable_shard0):
+    @parameterized.expand(
+        (batch_size, drop_last, steps)
+        for (batch_size, drop_last), steps in itertools.product(
+            [(None, False), (1, False), (1, True), (3, False), (3, True)], [0, 2]
+        )
+    )
+    def test_repeated_resume(self, batch_size, drop_last, steps_after_resume):
+        def make_loader():
+            return StatefulDataLoader(
+                GeneratorIterableNoState([23]),
+                batch_size=batch_size,
+                drop_last=drop_last,
+                collate_fn=identity,
+                num_workers=0,
+            )
+
+        original = make_loader()
+        original_iter = iter(original)
+        for _ in range(3):
+            next(original_iter)
+        state = deepcopy(original.state_dict())
+        for _ in range(steps_after_resume):
+            next(original_iter)
+        expected = list(original_iter)
+
+        restored = make_loader()
+        restored.load_state_dict(state)
+        restored_iter = iter(restored)
+        for _ in range(steps_after_resume):
+            next(restored_iter)
+        state = deepcopy(restored.state_dict())
+        self.assertEqual(list(restored_iter), expected)
+
+        restored_again = make_loader()
+        restored_again.load_state_dict(state)
+        self.assertEqual(list(restored_again), expected)
+
     def _run_and_checkpoint(self, num_workers, batch_size, pw, interrupt, every_n_steps=1, shuffle=False):
         dataset = GeneratorIterableNoState([0, 100, 37])
         dl = StatefulDataLoader(
