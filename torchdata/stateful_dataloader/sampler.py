@@ -197,6 +197,12 @@ class StatefulDistributedSampler(torch.utils.data.distributed.DistributedSampler
         self.next_yielded = None
 
     def __iter__(self):
+        # Reset the counter as soon as a new iterator is requested, not on its first next().
+        # Otherwise a state_dict() taken in between reports the previous epoch's count.
+        self.yielded = 0
+        return self._iter()
+
+    def _iter(self):
         self.yielded = 0
         if self.next_yielded is not None:
             self.yielded = self.next_yielded

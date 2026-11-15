@@ -204,3 +204,28 @@ class TestSamplerWrapper(TestCase):
         sampler = DistributedSampler(ds, rank=1, num_replicas=2)
         node = SamplerWrapper(sampler=sampler, initial_epoch=initial_epoch, epoch_updater=epoch_updater)
         run_test_save_load_state(self, node, midpoint)
+
+
+class TestStatefulSamplerEpochBoundary(TestCase):
+    @parameterized.expand(
+        [(rank, shuffle, restart) for rank in (0, 1) for shuffle in (False, True) for restart in (False, True)]
+    )
+    def test_nodes_loader_checkpoint_before_first_item(self, rank, shuffle, restart):
+        from torchdata.nodes import Loader
+        from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
+
+        def make_loader():
+            sampler = StatefulDistributedSampler(range(17), num_replicas=2, rank=rank, shuffle=shuffle, seed=42)
+            return Loader(SamplerWrapper(sampler), restart_on_stop_iteration=restart)
+
+        loader = make_loader()
+        list(loader)
+        iterator = iter(loader)
+        state = loader.state_dict()
+        expected = list(iterator)
+        oracle = DistributedSampler(range(17), num_replicas=2, rank=rank, shuffle=shuffle, seed=42)
+        oracle.set_epoch(1)
+        self.assertEqual(expected, list(oracle))
+        restored = make_loader()
+        restored.load_state_dict(state)
+        self.assertEqual(list(restored), expected)

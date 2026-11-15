@@ -119,6 +119,40 @@ class TestDataLoader(TestCase):
         next(iterator)  # advance the iterator again
         self.assertEqual(sampler.yielded, 6)
 
+    def test_sampler_state_dict_before_first_next(self):
+        sampler = StatefulDistributedSampler(self.dataset, num_replicas=2, rank=0, shuffle=True, seed=42)
+        sampler.set_epoch(0)
+        list(sampler)  # finish epoch 0
+        sampler.set_epoch(1)
+        iterator = iter(sampler)
+        # Checkpoint taken after the new epoch's iterator is created, but before it is advanced
+        state_dict = sampler.state_dict()
+        self.assertEqual(state_dict["yielded"], 0)
+        expected = list(iterator)
+        self.assertEqual(len(expected), 50)
+
+        new_sampler = StatefulDistributedSampler(self.dataset, num_replicas=2, rank=0, shuffle=True, seed=42)
+        new_sampler.load_state_dict(state_dict)
+        self.assertEqual(list(new_sampler), expected)
+
+    def test_dataloader_state_dict_at_epoch_start(self):
+        def make_dataloader():
+            sampler = StatefulDistributedSampler(self.dataset, num_replicas=1, rank=0, shuffle=True, seed=42)
+            return sampler, StatefulDataLoader(self.dataset, batch_size=10, sampler=sampler)
+
+        sampler, dataloader = make_dataloader()
+        sampler.set_epoch(0)
+        list(dataloader)  # finish epoch 0
+        sampler.set_epoch(1)
+        iterator = iter(dataloader)
+        state_dict = dataloader.state_dict()
+        expected = [data.tolist() for data in iterator]
+        self.assertEqual(len(expected), 10)
+
+        _, new_dataloader = make_dataloader()
+        new_dataloader.load_state_dict(state_dict)
+        self.assertEqual([data.tolist() for data in new_dataloader], expected)
+
     def test_drop_last_effect(self):
         num_replicas = 3
         total_samples = len(self.dataset)
