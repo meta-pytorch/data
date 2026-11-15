@@ -54,7 +54,7 @@ class Prefetcher(BaseNode[T]):
         return self._it.get_state()  # type: ignore[union-attr]
 
     def shutdown(self):
-        if self._it is not None:
+        if hasattr(self, "_it") and self._it is not None:
             self._it._shutdown()
         if hasattr(self.source, "shutdown"):
             self.source.shutdown()

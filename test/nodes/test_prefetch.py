@@ -61,3 +61,34 @@ class TestPrefetcher(TestCase):
             node.shutdown()
             mock_shutdown.assert_called_once()
             mock_source.shutdown.assert_called_once()
+
+
+class ResetFailureSource(StatefulRangeNode):
+    fail_next_reset = False
+    shutdown_calls = 0
+
+    def reset(self, initial_state=None):
+        if self.fail_next_reset:
+            self.fail_next_reset = False
+            raise ValueError("temporary reset failure")
+        super().reset(initial_state)
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+
+
+class TestPrefetcherResetFailure(TestCase):
+    @parameterized.expand([False, True])
+    def test_cleanup_or_retry_after_failed_replacement(self, retry):
+        source = ResetFailureSource(n=4)
+        node = Prefetcher(source, prefetch_factor=2)
+        node.reset()
+        self.assertEqual(next(node)["i"], 0)
+        source.fail_next_reset = True
+        with self.assertRaisesRegex(ValueError, "temporary reset failure"):
+            node.reset()
+        if retry:
+            node.reset()
+            self.assertEqual([item["i"] for item in node], list(range(4)))
+        node.shutdown()
+        self.assertEqual(source.shutdown_calls, 1)
