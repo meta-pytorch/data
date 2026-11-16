@@ -42,7 +42,8 @@ class Loader(Generic[T]):
             self._it = LoaderIterator(self)
         elif self._iter_for_state_dict:
             self._iter_for_state_dict = False
-            return self._it  # This was already pre-called to get a state dict
+            if self._next_iter_state_dict is None:
+                return self._it  # This was already pre-called to get a state dict
 
         if self._next_iter_state_dict is not None:
             self._it.reset(initial_state=self._next_iter_state_dict)
