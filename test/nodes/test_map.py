@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+import threading
 import unittest
 from typing import List, Optional
 from unittest import mock
@@ -273,44 +274,58 @@ class TestMap(TestCase):
             parallel_mapper_iter._shutdown(cancel_futures=False)
             mock_shutdown.assert_called_with(wait=True)
 
-    def test_explicit_shutdown_thread(self):
-        """Test that the explicit shutdown method properly shuts down the node."""
-        mock_source = mock.MagicMock()
-        mock_source.shutdown = mock.MagicMock()
-
+    @parameterized.expand(itertools.product([None, 3], [0, 1]))
+    def test_explicit_shutdown_thread(self, prebatch, num_workers):
+        """Public shutdown must stop actual workers and release the source."""
+        source = MockSource(num_samples=20)
+        source.shutdown = mock.MagicMock()
         node = ParallelMapper(
-            mock_source,
-            RandomSleepUdf(),
-            num_workers=2,
+            source,
+            lambda item: item,
+            num_workers=num_workers,
             method="thread",
+            prebatch=prebatch,
         )
-
+        previous_threads = set(threading.enumerate())
         node.reset()
-
-        with mock.patch.object(node._it._it, "_shutdown") as mock_shutdown:
+        next(node)
+        worker_threads = set(threading.enumerate()) - previous_threads
+        # Retain the inner mapper solely to clean up if the regression fails.
+        inner = node._it if prebatch is None else node._it.source
+        try:
             node.shutdown()
-            mock_shutdown.assert_called_once_with(cancel_futures=True)
-            mock_source.shutdown.assert_called_once()
+            self.assertFalse(any(thread.is_alive() for thread in worker_threads))
+            source.shutdown.assert_called_once()
+        finally:
+            inner.shutdown()
 
-    def test_explicit_shutdown_process(self):
-        """Test that the explicit shutdown method properly shuts down the node with process method."""
-        multiprocessing_context = None if IS_WINDOWS else "forkserver"
-
-        mock_source = mock.MagicMock()
-        mock_source.shutdown = mock.MagicMock()
-
+    @parameterized.expand([(None,), (3,)])
+    def test_explicit_shutdown_process(self, prebatch):
+        """Public shutdown joins the mapper's spawned processes and releases its source."""
+        source = MockSource(num_samples=20)
+        source.shutdown = mock.MagicMock()
         node = ParallelMapper(
-            mock_source,
+            source,
             RandomSleepUdf(),
             num_workers=2,
             method="process",
-            multiprocessing_context=multiprocessing_context,
+            multiprocessing_context="spawn",
+            prebatch=prebatch,
         )
 
         node.reset()
-
-        # Mock the _shutdown method of the iterator
-        with mock.patch.object(node._it._it, "_shutdown") as mock_shutdown:
+        inner = node._it if prebatch is None else node._it.source
+        workers = inner._it._workers
+        try:
+            next(node)
+            self.assertEqual(len(workers), 2)
+            self.assertTrue(all(worker.is_alive() for worker in workers))
             node.shutdown()
-            mock_shutdown.assert_called_once_with(cancel_futures=True)
-            mock_source.shutdown.assert_called_once()
+            self.assertFalse(any(worker.is_alive() for worker in workers))
+            source.shutdown.assert_called_once()
+        finally:
+            inner.shutdown()
+            for worker in workers:
+                if worker.is_alive():
+                    worker.terminate()
+                    worker.join(timeout=5)

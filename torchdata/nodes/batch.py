@@ -61,6 +61,9 @@ class Batcher(BaseNode[List[T]]):
     def get_state(self) -> Dict[str, Any]:
         return {self.SOURCE_KEY: self.source.state_dict()}
 
+    def shutdown(self) -> None:
+        self.source.shutdown()
+
 
 class Collator(Batcher[T]):
     """Convenience node that batches items and applies a collate function to each batch.
@@ -140,3 +143,6 @@ class Unbatcher(BaseNode[T]):
             self.SOURCE_KEY: self._cached_state_dict,
             self.BATCH_IDX_KEY: self._batch_idx,
         }
+
+    def shutdown(self) -> None:
+        self.source.shutdown()
