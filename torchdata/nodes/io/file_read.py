@@ -138,6 +138,11 @@ class FileReader(BaseNode[Dict]):
         # Preserve metadata from source
         source_metadata = file_path_item.get(self.METADATA_KEY, {})
 
+        transport_params = self.transport_params.copy()
+        compression_kwargs: Dict[str, Any] = {}
+        if "compression" in transport_params:
+            compression_kwargs["compression"] = transport_params.pop("compression")
+
         content = None
         # Compute total attempts: at least 1 attempt even if max_retries == 0
         total_attempts = max(1, self.max_retries)
@@ -147,7 +152,8 @@ class FileReader(BaseNode[Dict]):
                     file_path,
                     self.mode,
                     encoding=None if "b" in self.mode else self.encoding,
-                    transport_params=self.transport_params,
+                    transport_params=transport_params,
+                    **compression_kwargs,
                 ) as f:
                     content = f.read()
                     break
