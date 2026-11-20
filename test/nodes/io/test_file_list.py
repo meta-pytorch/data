@@ -84,6 +84,18 @@ def test_local_file_list_all_files(sample_local_files):
         assert expected_file in file_paths
 
 
+@pytest.mark.parametrize("pattern", ["*", "**/*", "*.txt", "**/*.txt"])
+@pytest.mark.parametrize("include_file", [False, True])
+def test_local_file_list_skips_matching_directories(tmp_path, pattern, include_file):
+    (tmp_path / "directory.txt").mkdir()
+    if include_file:
+        (tmp_path / "file.txt").write_text("content")
+
+    items = list(FileLister(str(tmp_path), [pattern]))
+
+    assert [os.path.basename(item["data"]) for item in items] == (["file.txt"] if include_file else [])
+
+
 def test_local_file_list_specific_pattern(sample_local_files):
     """Test listing files matching specific patterns."""
     tmp_dir, _ = sample_local_files

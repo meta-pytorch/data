@@ -110,9 +110,7 @@ class FileLister(BaseNode[Dict]):
                 try:
                     matches = self.fs.glob(pattern_path)
 
-                    # Filter out directories from matches if pattern is **/* or *
-                    if pattern == "**/*" or pattern == "*":
-                        matches = [match for match in matches if self.fs.isfile(match)]
+                    matches = [match for match in matches if self.fs.isfile(match)]
 
                     # For local filesystem, ensure matches include the base path when relative
                     normalized_matches: List[str] = []
