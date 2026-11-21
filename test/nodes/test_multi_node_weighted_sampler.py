@@ -5,10 +5,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+import pickle
 
 from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase
 from torchdata.nodes.adapters import IterableWrapper
+from torchdata.nodes.loader import Loader
 from torchdata.nodes.prefetch import Prefetcher
 
 from torchdata.nodes.samplers.multi_node_weighted_sampler import MultiNodeWeightedSampler
@@ -36,6 +38,96 @@ class TestMultiNodeWeightedSampler(TestCase):
             from torchdata.nodes import MultiNodeWeightedSampler, StopCriteria  # noqa
         except ImportError:
             self.fail("MultiNodeWeightedSampler or StopCriteria failed to import")
+
+    @parameterized.expand(
+        itertools.product((StopCriteria.CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED, StopCriteria.CYCLE_FOREVER), (True, False))
+    )
+    def test_cycle_with_empty_sources(self, stop_criteria: str, empty_first: bool) -> None:
+        entries = [("empty", []), ("data", range(4))]
+        if not empty_first:
+            entries.reverse()
+        sources = {key: IterableWrapper(values) for key, values in entries}
+        node = MultiNodeWeightedSampler(
+            sources, {key: 1.0 for key in sources}, stop_criteria=stop_criteria, tag_output=True
+        )
+        loader = Loader(node, restart_on_stop_iteration=False)
+        expected = [{"dataset_key": "data", "data": value} for value in range(4)]
+        if stop_criteria == StopCriteria.CYCLE_FOREVER:
+            self.assertEqual(list(itertools.islice(loader, 8)), expected * 2)
+        else:
+            self.assertEqual(list(loader), expected)
+
+    @parameterized.expand([StopCriteria.CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED, StopCriteria.CYCLE_FOREVER])
+    def test_cycle_all_empty_sources(self, stop_criteria: str) -> None:
+        sources = {"a": IterableWrapper([]), "b": IterableWrapper([])}
+        node = MultiNodeWeightedSampler(sources, {"a": 1.0, "b": 1.0}, stop_criteria=stop_criteria)
+        self.assertEqual(list(node), [])
+
+    @parameterized.expand([StopCriteria.CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED, StopCriteria.CYCLE_FOREVER])
+    def test_resume_cycle_with_empty_sources(self, stop_criteria: str) -> None:
+        def make_loader():
+            sources = {"data": IterableWrapper(range(4)), "empty": IterableWrapper([])}
+            node = MultiNodeWeightedSampler(sources, {"data": 1.0, "empty": 1.0}, stop_criteria=stop_criteria)
+            return Loader(node, restart_on_stop_iteration=False)
+
+        loader = make_loader()
+        iterator = iter(loader)
+        self.assertEqual(next(iterator), 0)
+        self.assertEqual(next(iterator), 1)
+        state = loader.state_dict()
+        restored = make_loader()
+        restored.load_state_dict(state)
+        expected = [2, 3]
+        if stop_criteria == StopCriteria.CYCLE_FOREVER:
+            self.assertEqual(list(itertools.islice(restored, 6)), expected + list(range(4)))
+        else:
+            self.assertEqual(list(restored), expected)
+
+    @parameterized.expand([StopCriteria.CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED, StopCriteria.CYCLE_FOREVER])
+    def test_cycle_with_high_weight_empty_source(self, stop_criteria: str) -> None:
+        sources = {"empty": IterableWrapper([]), "data": IterableWrapper(range(4))}
+        node = MultiNodeWeightedSampler(sources, {"empty": 1e20, "data": 1.0}, stop_criteria=stop_criteria)
+        expected = list(range(4))
+        if stop_criteria == StopCriteria.CYCLE_FOREVER:
+            self.assertEqual(list(itertools.islice(node, 8)), expected * 2)
+        else:
+            self.assertEqual(list(node), expected)
+
+    def test_cycle_forever_with_high_weight_all_empty_sources(self) -> None:
+        sources = {"a": IterableWrapper([]), "b": IterableWrapper([])}
+        node = MultiNodeWeightedSampler(sources, {"a": 1e20, "b": 1.0}, stop_criteria=StopCriteria.CYCLE_FOREVER)
+        self.assertEqual(list(node), [])
+
+    @parameterized.expand([StopCriteria.CYCLE_UNTIL_ALL_DATASETS_EXHAUSTED, StopCriteria.CYCLE_FOREVER])
+    def test_resume_cycle_with_multiple_nonempty_sources(self, stop_criteria: str) -> None:
+        def make_loader():
+            sources = {
+                "empty": IterableWrapper([]),
+                "a": IterableWrapper(range(3)),
+                "b": IterableWrapper(range(5)),
+            }
+            node = MultiNodeWeightedSampler(
+                sources, {"empty": 1e20, "a": 1.0, "b": 3.0}, stop_criteria=stop_criteria, tag_output=True
+            )
+            return Loader(node, restart_on_stop_iteration=False)
+
+        expected = list(itertools.islice(make_loader(), 20))
+        if stop_criteria == StopCriteria.CYCLE_FOREVER:
+            self.assertEqual(len(expected), 20)
+        else:
+            self.assertGreaterEqual(len(expected), 8)
+            self.assertEqual(
+                {(item["dataset_key"], item["data"]) for item in expected},
+                {("a", value) for value in range(3)} | {("b", value) for value in range(5)},
+            )
+        loader = make_loader()
+        prefix = list(itertools.islice(loader, 3))
+        checkpoint = pickle.dumps(loader.state_dict())
+        self.assertEqual(prefix, expected[:3])
+        for _ in range(2):
+            restored = make_loader()
+            restored.load_state_dict(pickle.loads(checkpoint))
+            self.assertEqual(list(itertools.islice(restored, 17)), expected[3:])
 
     def _setup_multi_node_weighted_sampler(
         self, num_samples, num_datasets, weights_fn, stop_criteria, seed=0

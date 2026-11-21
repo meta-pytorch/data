@@ -75,6 +75,30 @@ class TestMultiNodeRoundRobinSampler(TestCase):
         for _ in batcher:
             self.fail("Expected no batches as each dataset is empty.")
 
+    @parameterized.expand([(0, 4), (4, 0), (0, 4, 0), (0, 0)])
+    def test_cycle_with_empty_sources(self, *lengths: int) -> None:
+        sources = {str(i): IterableWrapper(range(length)) for i, length in enumerate(lengths)}
+        node = MultiNodeRoundRobinSampler(sources, tag_output=True)
+        loader = Loader(node, restart_on_stop_iteration=False)
+        expected = [
+            {"dataset_key": str(i), "data": value} for i, length in enumerate(lengths) for value in range(length)
+        ]
+        self.assertEqual(list(loader), expected)
+
+    def test_resume_cycle_with_empty_sources(self) -> None:
+        def make_loader():
+            sources = {"empty": IterableWrapper([]), "data": IterableWrapper(range(4))}
+            return Loader(MultiNodeRoundRobinSampler(sources), restart_on_stop_iteration=False)
+
+        loader = make_loader()
+        iterator = iter(loader)
+        self.assertEqual(next(iterator), 0)
+        self.assertEqual(next(iterator), 1)
+        state = loader.state_dict()
+        restored = make_loader()
+        restored.load_state_dict(state)
+        self.assertEqual(list(restored), [2, 3])
+
     @parameterized.expand([4, 8, 16])
     def test_single_dataset(self, num_samples: int) -> None:
         datasets = self.get_equal_dataset(num_samples, 1)
