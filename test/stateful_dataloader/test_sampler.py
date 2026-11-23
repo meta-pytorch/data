@@ -237,6 +237,28 @@ class TestDataLoader(TestCase):
         self.assertEqual(results1, results2, "Data should be replicable with same seed")
         self.assertNotEqual(results1, results3, "Data should not be replicable with different seed")
 
+    def test_random_sampler_checkpoint_restores_used_iterator(self):
+        for replacement in (False, True):
+            sampler = RandomSampler(range(10), replacement, 70, torch.Generator().manual_seed(42))
+            iterator = iter(sampler)
+            for _ in range(35):
+                next(iterator)
+            state = iterator.state_dict()
+            legacy_state = {key: state[key] for key in ("generator", "yielded")}
+            expected = list(iterator)
+            expected_draw = torch.rand(4, generator=sampler.generator)
+
+            for consumed in (5, 70):
+                with self.subTest(replacement=replacement, consumed=consumed):
+                    resumed_sampler = RandomSampler(range(10), replacement, 70, torch.Generator().manual_seed(99))
+                    resumed = iter(resumed_sampler)
+                    for _ in range(consumed):
+                        next(resumed)
+                    for _ in range(2):
+                        resumed.load_state_dict(legacy_state)
+                        self.assertEqual(list(resumed), expected)
+                        self.assertEqual(torch.rand(4, generator=resumed_sampler.generator), expected_draw)
+
 
 if __name__ == "__main__":
     run_tests()
