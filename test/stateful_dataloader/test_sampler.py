@@ -14,7 +14,11 @@ from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN,
 from torch.utils.data import Dataset
 
 from torchdata.stateful_dataloader import StatefulDataLoader
-from torchdata.stateful_dataloader.sampler import RandomSampler, StatefulDistributedSampler
+from torchdata.stateful_dataloader.sampler import (
+    _StatefulRandomSamplerIterator,
+    RandomSampler,
+    StatefulDistributedSampler,
+)
 
 
 class MockDataset(Dataset):
@@ -236,6 +240,97 @@ class TestDataLoader(TestCase):
 
         self.assertEqual(results1, results2, "Data should be replicable with same seed")
         self.assertNotEqual(results1, results3, "Data should not be replicable with different seed")
+
+    def _make_shared_generator_loader(self, replacement=False, num_samples=25):
+        data = list(range(10))
+        generator = torch.Generator().manual_seed(42)
+        sampler = RandomSampler(data, replacement=replacement, num_samples=num_samples, generator=generator)
+        return StatefulDataLoader(
+            data,
+            batch_size=2,
+            sampler=sampler,
+            generator=generator,
+            num_workers=0,
+        )
+
+    def test_random_sampler_shared_generator_resume(self):
+        # When the sampler and the loader share a generator, the loader
+        # advances that generator (e.g. for its base seed) after the sampler
+        # drew its first permutation. Restoring a checkpoint must reproduce
+        # the uninterrupted stream, including permutations drawn after the
+        # checkpoint.
+        for replacement, num_samples in [(False, 25), (True, 25), (True, 50)]:
+            with self.subTest(replacement=replacement, num_samples=num_samples):
+                original = self._make_shared_generator_loader(replacement, num_samples)
+                iterator = iter(original)
+                next(iterator)
+                checkpoint = original.state_dict()
+                expected = [batch.tolist() for batch in iterator]
+
+                restored = self._make_shared_generator_loader(replacement, num_samples)
+                restored.load_state_dict(checkpoint)
+                actual = [batch.tolist() for batch in restored]
+
+                self.assertEqual(expected, actual)
+
+    def test_random_sampler_shared_generator_resume_next_epoch(self):
+        # With the default sample count the remainder of the checkpointed
+        # epoch can resume correctly while the following epoch's order
+        # diverges; both epochs must match uninterrupted iteration.
+        def make_loader():
+            data = list(range(10))
+            generator = torch.Generator().manual_seed(123)
+            sampler = RandomSampler(data, generator=generator)
+            return StatefulDataLoader(
+                data,
+                batch_size=2,
+                sampler=sampler,
+                generator=generator,
+                num_workers=0,
+            )
+
+        original = make_loader()
+        iterator = iter(original)
+        next(iterator)
+        checkpoint = original.state_dict()
+        expected_rest = [batch.tolist() for batch in iterator]
+        expected_next_epoch = [batch.tolist() for batch in original]
+
+        restored = make_loader()
+        restored.load_state_dict(checkpoint)
+        actual_rest = [batch.tolist() for batch in restored]
+        actual_next_epoch = [batch.tolist() for batch in restored]
+
+        self.assertEqual(expected_rest, actual_rest)
+        self.assertEqual(expected_next_epoch, actual_next_epoch)
+
+    def test_random_sampler_legacy_state_dict_still_loads(self):
+        # State dicts written before the sampler recorded its permutation and
+        # checkpoint-time generator states only contain the yielded count and
+        # the initial generator state. They must keep loading.
+        original = self._make_shared_generator_loader()
+        iterator = iter(original)
+        next(iterator)
+        checkpoint = original.state_dict()
+
+        def strip_new_keys(sd):
+            if isinstance(sd, dict):
+                return {
+                    key: strip_new_keys(value)
+                    for key, value in sd.items()
+                    if key
+                    not in (
+                        _StatefulRandomSamplerIterator._PERM_GENERATOR_STATE,
+                        _StatefulRandomSamplerIterator._PERM_INDEX,
+                        _StatefulRandomSamplerIterator._CURRENT_GENERATOR_STATE,
+                    )
+                }
+            return sd
+
+        restored = self._make_shared_generator_loader()
+        restored.load_state_dict(strip_new_keys(checkpoint))
+        # 25 samples at batch_size=2, one batch already consumed
+        self.assertEqual(len([batch for batch in restored]), 12)
 
 
 if __name__ == "__main__":
