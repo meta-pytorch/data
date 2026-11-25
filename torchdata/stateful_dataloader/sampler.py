@@ -18,6 +18,9 @@ from .stateful import Stateful
 class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
     _GENERATOR = "generator"
     _YIELDED = "yielded"
+    _PERM_GENERATOR_STATE = "perm_generator_state"
+    _PERM_INDEX = "perm_index"
+    _CURRENT_GENERATOR_STATE = "current_generator_state"
 
     def __init__(self, sampler):
         self.sampler = sampler
@@ -28,6 +31,10 @@ class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
         self.replacement = sampler.replacement
         self.num_samples = sampler.num_samples
         self.chunk_size = 32
+        # Generator state captured immediately before the current permutation
+        # (or chunk, when replacement=True) is drawn, so the permutation can
+        # be regenerated exactly on restore.
+        self.perm_generator_state = self.generator_state
         self.perm: List[int] = self._get_perm()
         self.perm_index = 0
         self.chunk_index = 0
@@ -50,6 +57,7 @@ class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
         if self.yielded == self.num_samples:
             raise StopIteration()
         if self.perm_index == len(self.perm):
+            self.perm_generator_state = self.sampler.generator.get_state()
             self.perm = self._get_perm()
             self.perm_index = 0
         val = self.perm[self.perm_index]
@@ -61,14 +69,40 @@ class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
         return {
             self._YIELDED: self.yielded,
             self._GENERATOR: self.generator_state,
+            self._PERM_GENERATOR_STATE: self.perm_generator_state,
+            self._PERM_INDEX: self.perm_index,
+            # Live generator position at checkpoint time. Other consumers of
+            # a shared generator (e.g. the loader drawing its base seed) may
+            # have advanced it since the current permutation was drawn, and
+            # those draws are part of the sequence a restore must reproduce.
+            self._CURRENT_GENERATOR_STATE: self.sampler.generator.get_state(),
         }
 
     def load_state_dict(self, state_dict: dict) -> None:
         self.next_yielded = state_dict[self._YIELDED]
         self.generator_state = state_dict[self._GENERATOR]
+
+        if self._PERM_GENERATOR_STATE in state_dict:
+            # Regenerate the current permutation from the state captured just
+            # before it was drawn, resume at the saved position within it,
+            # then move the generator to its checkpoint-time position so the
+            # next permutation is drawn from the same state as in
+            # uninterrupted iteration.
+            self.perm_generator_state = state_dict[self._PERM_GENERATOR_STATE]
+            self.sampler.generator.set_state(self.perm_generator_state)
+            self.perm = self._get_perm()
+            self.perm_index = state_dict[self._PERM_INDEX]
+            self.yielded = self.next_yielded
+            self.next_yielded = None
+            self.sampler.generator.set_state(state_dict[self._CURRENT_GENERATOR_STATE])
+            return
+
+        # State dicts saved before perm_generator_state was recorded only
+        # carry the iterator's initial generator state; replay from it.
         self.sampler.generator.set_state(self.generator_state)
 
         if self.next_yielded is not None:
+            self.perm_generator_state = self.sampler.generator.get_state()
             self.perm = self._get_perm()  # We want permutations from the latest generator state that's loaded
             for _ in range(self.next_yielded):
                 next(self)
