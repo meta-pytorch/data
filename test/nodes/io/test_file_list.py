@@ -335,6 +335,60 @@ def test_file_list_state_validation_index_out_of_bounds(sample_local_files):
         new_node.reset(corrupted_state)
 
 
+def test_file_list_state_restore_exhausted(sample_local_files):
+    """Test that a checkpoint taken after the final file can be restored.
+
+    Consuming the last file leaves ``current_idx == num_files``; that is a
+    valid exhausted cursor, not a sign that the filesystem changed.
+    """
+    tmp_dir, _ = sample_local_files
+
+    node = FileLister(tmp_dir, ["**/*"])
+    list(node)  # Consume the entire listing
+    state = node.get_state()
+    assert state["current_idx"] == state["num_files"]
+
+    new_node = FileLister(tmp_dir, ["**/*"])
+    new_node.reset(state)  # Should not raise
+
+    # The restored node is exhausted and yields nothing further
+    assert list(new_node) == []
+
+
+def test_file_list_state_restore_empty_listing(tmp_path):
+    """Test that the state of an empty listing (index 0 of 0) restores."""
+    node = FileLister(str(tmp_path), ["*.txt"])
+    assert list(node) == []
+    state = node.get_state()
+    assert state == {"current_idx": 0, "num_files": 0}
+
+    new_node = FileLister(str(tmp_path), ["*.txt"])
+    new_node.reset(state)  # Should not raise
+    assert list(new_node) == []
+
+
+def test_file_list_buffered_resume_after_exhaustion(tmp_path):
+    """Resuming a Loader whose Shuffler exhausted the listing keeps buffered items."""
+    from torchdata.nodes import Loader, Shuffler
+
+    for index in range(2):
+        (tmp_path / f"{index}.txt").write_text("sample")
+
+    def make_loader():
+        return Loader(Shuffler(FileLister(str(tmp_path), ["*.txt"]), buffer_size=2, seed=42))
+
+    loader = make_loader()
+    iterator = iter(loader)
+    next(iterator)
+    state = loader.state_dict()
+    remaining = list(iterator)
+    assert len(remaining) == 1
+
+    restored = make_loader()
+    restored.load_state_dict(state)
+    assert list(restored) == remaining
+
+
 def test_file_list_protocol_handling():
     """Test that FileLister correctly handles different protocols."""
     # Test local filesystem
