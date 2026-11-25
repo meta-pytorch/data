@@ -102,6 +102,7 @@ class _StatefulRandomSamplerIterator(Iterator[int], Stateful):
         self.sampler.generator.set_state(self.generator_state)
 
         if self.next_yielded is not None:
+            self.perm_generator_state = self.sampler.generator.get_state()
             self.perm = self._get_perm()  # We want permutations from the latest generator state that's loaded
             for _ in range(self.next_yielded):
                 next(self)

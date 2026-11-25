@@ -332,6 +332,34 @@ class TestDataLoader(TestCase):
         # 25 samples at batch_size=2, one batch already consumed
         self.assertEqual(len([batch for batch in restored]), 12)
 
+    def test_legacy_sampler_checkpoint_can_be_resaved_in_new_format(self):
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+
+                def make_iterator(seed):
+                    return iter(
+                        RandomSampler(
+                            range(13),
+                            replacement=replacement,
+                            num_samples=45,
+                            generator=torch.Generator().manual_seed(seed),
+                        )
+                    )
+
+                original = make_iterator(123)
+                for _ in range(5):
+                    next(original)
+                state = original.state_dict()
+                legacy = {key: state[key] for key in ("yielded", "generator")}
+                expected = list(original)
+                migrated = make_iterator(999)
+                migrated.load_state_dict(legacy)
+                checkpoint = migrated.state_dict()
+                self.assertEqual(list(migrated), expected)
+                restored = make_iterator(777)
+                restored.load_state_dict(checkpoint)
+                self.assertEqual(list(restored), expected)
+
 
 if __name__ == "__main__":
     run_tests()
